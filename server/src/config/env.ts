@@ -1,0 +1,43 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { config as loadEnv } from 'dotenv'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+loadEnv({ path: path.resolve(__dirname, '../../.env') })
+
+function envBool(value: string | undefined, fallback: boolean): boolean {
+  if (value == null || value === '') return fallback
+  return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase())
+}
+
+function envInt(value: string | undefined, fallback: number): number {
+  const n = Number.parseInt(value ?? '', 10)
+  return Number.isFinite(n) ? n : fallback
+}
+
+export const config = {
+  port: envInt(process.env.PORT, 3001),
+  ollama: {
+    model: process.env.OLLAMA_MODEL ?? 'qwen2.5:3b',
+    baseUrl: process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434',
+  },
+  magento: {
+    url: (process.env.MAGENTO_URL ?? '').replace(/\/$/, ''),
+    graphqlUrl: process.env.MAGENTO_GRAPHQL_URL ?? '',
+    storeCode: process.env.MAGENTO_STORE_CODE ?? 'default',
+    accessToken: process.env.MAGENTO_ACCESS_TOKEN ?? '',
+    useAuth: envBool(process.env.MAGENTO_GRAPHQL_USE_AUTH, false),
+    pageSize: envInt(process.env.MAGENTO_PAGE_SIZE, 0),
+    timeoutMs: envInt(process.env.MAGENTO_TIMEOUT_MS, 20000),
+  },
+}
+
+export function isMagentoConfigured(): boolean {
+  return Boolean(config.magento.graphqlUrl || config.magento.url)
+}
+
+export function getMagentoGraphqlUrl(): string {
+  if (config.magento.graphqlUrl) return config.magento.graphqlUrl
+  if (config.magento.url) return `${config.magento.url}/graphql`
+  return ''
+}
