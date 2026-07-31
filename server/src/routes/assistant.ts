@@ -1,21 +1,38 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import { runAssistantTurn, type AiResponse } from '../ai/engine.js'
+import { runAssistantTurn, type AiResponse, type ProductFilters } from '../ai/engine.js'
+import { isContextMemoryConfigured } from '../config/env.js'
+import { contextRecommendationService } from '../context/services/ContextRecommendationService.js'
 import { findDirectSkuOrNameMatch } from '../magento/search.js'
+import {
+  replayPreviousSearch,
+  type ReplayedSearch,
+} from '../services/contextReplay.js'
 import { searchProducts } from '../services/productSearch.js'
 import {
   createSession,
   getSession,
   saveSession,
+  type AssistantSession,
 } from '../session/store.js'
+
+const filtersRecord = z.record(
+  z.string(),
+  z.union([z.string(), z.number(), z.boolean()]),
+)
 
 const startSchema = z.object({
   query: z.string().trim().min(1),
+  userId: z.string().trim().min(1).max(128).optional(),
+  /** When customer chooses Continue Previous Search — seed known filters. */
+  reuseFilters: filtersRecord.optional(),
+  reuseHistoryId: z.string().uuid().optional(),
 })
 
 const messageSchema = z.object({
   sessionId: z.string().uuid(),
   answer: z.string().trim().min(1),
+  userId: z.string().trim().min(1).max(128).optional(),
 })
 
 const searchSchema = z
@@ -50,6 +67,72 @@ function toClientResponse(sessionId: string, ai: AiResponse) {
   }
 }
 
+function buildReplayMessage(replayed: ReplayedSearch): string {
+  const forQuery = replayed.previousQuery
+    ? ` for "${replayed.previousQuery}"`
+    : ''
+  const parts = [
+    `Continuing your previous search${forQuery}. Showing the same products, with current prices and availability.`,
+  ]
+
+  if (replayed.droppedCount > 0) {
+    parts.push(
+      replayed.droppedCount === 1
+        ? '1 item is no longer available and has been removed.'
+        : `${replayed.droppedCount} items are no longer available and have been removed.`,
+    )
+  }
+
+  return parts.join(' ')
+}
+
+async function persistSessionContext(
+  session: AssistantSession,
+  extras?: {
+    products?: unknown[]
+    alternatives?: unknown[]
+    source?: string
+    matchType?: string
+  },
+): Promise<void> {
+  if (!isContextMemoryConfigured() || !session.userId) return
+
+  const originalQuery =
+    typeof session.filters.query === 'string'
+      ? session.filters.query
+      : session.messages.find((m) => m.role === 'user')?.content
+
+  if (!originalQuery?.trim()) return
+
+  try {
+    await contextRecommendationService.save({
+      userId: session.userId,
+      sessionId: session.id,
+      originalQuery: originalQuery.trim(),
+      domain:
+        typeof session.filters.domain === 'string'
+          ? session.filters.domain
+          : undefined,
+      category:
+        typeof session.filters.category === 'string'
+          ? session.filters.category
+          : undefined,
+      filters: session.filters as Record<string, unknown>,
+      messages: session.messages,
+      products: extras?.products,
+      alternatives: extras?.alternatives,
+      source: extras?.source,
+      matchType: extras?.matchType,
+      actor: session.userId,
+    })
+  } catch (error) {
+    console.warn(
+      '[assistant] context save failed',
+      error instanceof Error ? error.message : error,
+    )
+  }
+}
+
 export const assistantRouter = Router()
 
 assistantRouter.post('/start', async (req, res) => {
@@ -59,13 +142,64 @@ assistantRouter.post('/start', async (req, res) => {
     return
   }
 
-  const { query } = parsed.data
-  const session = createSession()
+  const { query, userId, reuseFilters, reuseHistoryId } = parsed.data
+  const seeded: ProductFilters = {
+    ...(reuseFilters ?? {}),
+    query,
+  }
+
+  const session = createSession({
+    userId,
+    filters: seeded,
+    reusedContext: Boolean(reuseFilters && Object.keys(reuseFilters).length),
+  })
   session.messages.push({ role: 'user', content: query })
-  session.filters = { query }
+
+  if (reuseHistoryId && isContextMemoryConfigured()) {
+    void contextRecommendationService
+      .continuePrevious(reuseHistoryId)
+      .catch(() => undefined)
+
+    try {
+      const replayed = await replayPreviousSearch(reuseHistoryId, userId ?? '')
+      if (replayed) {
+        const message = buildReplayMessage(replayed)
+        session.filters = {
+          ...(replayed.filters as ProductFilters),
+          query: replayed.previousQuery ?? query,
+        }
+        session.messages.push({ role: 'assistant', content: message })
+        session.status = 'completed'
+        saveSession(session)
+
+        // Not persisted as new context: replaying is not a new search, and
+        // continuePrevious() already recorded the reuse.
+        res.json({
+          sessionId: session.id,
+          action: 'search_products' as const,
+          message,
+          filters: session.filters,
+          products: replayed.products,
+          alternatives: replayed.alternatives,
+          source: replayed.source,
+          totalCount: replayed.totalCount,
+          matchedCategories: [],
+          matchType: replayed.matchType,
+          fromMemory: true,
+          previousQuery: replayed.previousQuery,
+          savedAt: replayed.savedAt,
+        })
+        return
+      }
+    } catch (error) {
+      console.warn(
+        '[assistant/start] context replay failed; running a live search',
+        error instanceof Error ? error.message : error,
+      )
+    }
+  }
 
   try {
-    // Direct SKU / product name → show matches + alternatives, skip clarifying questions
     const direct = await findDirectSkuOrNameMatch(query)
     if (direct && direct.products.length > 0) {
       const message =
@@ -75,6 +209,12 @@ assistantRouter.post('/start', async (req, res) => {
       session.messages.push({ role: 'assistant', content: message })
       session.status = 'completed'
       saveSession(session)
+      void persistSessionContext(session, {
+        products: direct.products,
+        alternatives: direct.alternatives,
+        source: 'magento',
+        matchType: direct.matchType,
+      })
 
       res.json({
         sessionId: session.id,
@@ -130,8 +270,15 @@ assistantRouter.post('/start', async (req, res) => {
       query: session.filters.query ?? query,
     }
     const result = await searchProducts(searchFilters)
+    session.filters = searchFilters
     session.status = 'completed'
     saveSession(session)
+    void persistSessionContext(session, {
+      products: result.products,
+      alternatives: result.alternatives,
+      source: result.source,
+      matchType: result.matchType,
+    })
 
     res.json({
       ...toClientResponse(session.id, { ...ai, filters: searchFilters }),
@@ -162,11 +309,15 @@ assistantRouter.post('/message', async (req, res) => {
     return
   }
 
-  const { sessionId, answer } = parsed.data
+  const { sessionId, answer, userId } = parsed.data
   const session = getSession(sessionId)
   if (!session) {
     res.status(404).json({ error: 'Session not found' })
     return
+  }
+
+  if (userId && !session.userId) {
+    session.userId = userId
   }
 
   session.messages.push({ role: 'user', content: answer })
@@ -214,8 +365,15 @@ assistantRouter.post('/message', async (req, res) => {
       query: session.filters.query ?? ai.filters.query,
     }
     const result = await searchProducts(searchFilters)
+    session.filters = searchFilters
     session.status = 'completed'
     saveSession(session)
+    void persistSessionContext(session, {
+      products: result.products,
+      alternatives: result.alternatives,
+      source: result.source,
+      matchType: result.matchType,
+    })
 
     res.json({
       ...toClientResponse(session.id, { ...ai, filters: searchFilters }),

@@ -8,23 +8,32 @@ export interface SessionMessage {
 
 export interface AssistantSession {
   id: string
+  userId?: string
   createdAt: number
   updatedAt: number
   messages: SessionMessage[]
   filters: ProductFilters
   status: 'collecting' | 'ready_to_search' | 'completed'
+  /** True when user explicitly continued a previous shopping context. */
+  reusedContext?: boolean
 }
 
 const sessions = new Map<string, AssistantSession>()
 
-export function createSession(): AssistantSession {
+export function createSession(options?: {
+  userId?: string
+  filters?: ProductFilters
+  reusedContext?: boolean
+}): AssistantSession {
   const session: AssistantSession = {
     id: randomUUID(),
+    userId: options?.userId,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     messages: [],
-    filters: {},
+    filters: options?.filters ?? {},
     status: 'collecting',
+    reusedContext: options?.reusedContext ?? false,
   }
   sessions.set(session.id, session)
   return session

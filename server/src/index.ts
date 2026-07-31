@@ -6,10 +6,13 @@ import { getModelInfo } from './ai/engine.js'
 import {
   config,
   getMagentoGraphqlUrl,
+  isContextMemoryConfigured,
   isMagentoConfigured,
 } from './config/env.js'
+import { pingContextDatabase } from './context/db.js'
 import { magentoGraphql } from './magento/client.js'
 import { assistantRouter } from './routes/assistant.js'
+import { contextRouter } from './routes/context.js'
 
 const app = express()
 app.use(cors())
@@ -38,6 +41,10 @@ app.get('/api/health', async (_req, res) => {
     }
   }
 
+  const contextMemory = isContextMemoryConfigured()
+    ? await pingContextDatabase()
+    : { ok: false, error: 'not_configured' }
+
   res.json({
     ok: true,
     ...getModelInfo(),
@@ -45,10 +52,16 @@ app.get('/api/health', async (_req, res) => {
       ...magento,
       storeCode: config.magento.storeCode,
     },
+    contextMemory: {
+      enabled: isContextMemoryConfigured(),
+      similarityThreshold: config.context.similarityThreshold,
+      ...contextMemory,
+    },
   })
 })
 
 app.use('/api/assistant', assistantRouter)
+app.use('/api/context', contextRouter)
 
 app.listen(config.port, () => {
   const info = getModelInfo()
@@ -56,5 +69,8 @@ app.listen(config.port, () => {
   console.log(`Ollama model: ${info.model} @ ${info.baseUrl}`)
   console.log(
     `Magento GraphQL: ${getMagentoGraphqlUrl() || '(not configured)'}`,
+  )
+  console.log(
+    `Context memory: ${isContextMemoryConfigured() ? 'enabled' : 'disabled'}`,
   )
 })

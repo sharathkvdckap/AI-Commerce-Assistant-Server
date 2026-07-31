@@ -15,6 +15,11 @@ function envInt(value: string | undefined, fallback: number): number {
   return Number.isFinite(n) ? n : fallback
 }
 
+function envFloat(value: string | undefined, fallback: number): number {
+  const n = Number.parseFloat(value ?? '')
+  return Number.isFinite(n) ? n : fallback
+}
+
 export const config = {
   port: envInt(process.env.PORT, 3001),
   ollama: {
@@ -30,6 +35,19 @@ export const config = {
     pageSize: envInt(process.env.MAGENTO_PAGE_SIZE, 0),
     timeoutMs: envInt(process.env.MAGENTO_TIMEOUT_MS, 20000),
   },
+  /** User context memory (pgvector + BGE-M3). Separate from product semantic search. */
+  context: {
+    enabled: envBool(process.env.CONTEXT_MEMORY_ENABLED, true),
+    databaseUrl:
+      process.env.DATABASE_URL ??
+      'postgresql://postgres:postgres@127.0.0.1:5432/ai_commerce_assistant',
+    embeddingModel: process.env.EMBEDDING_MODEL ?? 'bge-m3',
+    embeddingDims: envInt(process.env.EMBEDDING_DIMS, 1024),
+    similarityThreshold: envFloat(
+      process.env.CONTEXT_SIMILARITY_THRESHOLD,
+      0.8,
+    ),
+  },
 }
 
 export function isMagentoConfigured(): boolean {
@@ -40,4 +58,8 @@ export function getMagentoGraphqlUrl(): string {
   if (config.magento.graphqlUrl) return config.magento.graphqlUrl
   if (config.magento.url) return `${config.magento.url}/graphql`
   return ''
+}
+
+export function isContextMemoryConfigured(): boolean {
+  return config.context.enabled && Boolean(config.context.databaseUrl)
 }

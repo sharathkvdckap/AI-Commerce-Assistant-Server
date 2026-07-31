@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts"
+    "start": "tsx src/index.ts",
+    "db:migrate:context": "psql \"$DATABASE_URL\" -f sql/002_user_context_memory.sql"
   },
   "dependencies": {
     "@langchain/core": "^1.1.35",
@@ -13,6 +14,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "pg": "^8.22.0",
     "uuid": "^13.0.0",
     "zod": "^4.3.6"
   },
@@ -20,6 +22,7 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^24.13.2",
+    "@types/pg": "^8.20.0",
     "@types/uuid": "^10.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"

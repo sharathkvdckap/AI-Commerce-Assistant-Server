@@ -9,6 +9,7 @@ import {
 } from './mapper.js'
 import type {
   CatalogProduct,
+  MagentoProductItem,
   MagentoProductsResponse,
 } from './types.js'
 
@@ -98,6 +99,38 @@ async function runProductsQuery(
     items: allItems.slice(0, maxTotal),
     totalCount,
   }
+}
+
+/** Magento rejects oversized filter arrays, so SKU lookups are chunked. */
+const SKU_LOOKUP_BATCH = 50
+
+/**
+ * Current catalog state for a known set of SKUs, keyed by SKU.
+ * A missing key means the product is no longer purchasable (removed,
+ * disabled, or out of the current store scope).
+ */
+export async function fetchProductsBySku(
+  skus: string[],
+): Promise<Map<string, MagentoProductItem>> {
+  const unique = [
+    ...new Set(skus.map((sku) => sku.trim()).filter((sku) => sku !== '')),
+  ]
+  const live = new Map<string, MagentoProductItem>()
+
+  for (let i = 0; i < unique.length; i += SKU_LOOKUP_BATCH) {
+    const batch = unique.slice(i, i + SKU_LOOKUP_BATCH)
+    const data = await magentoGraphql<MagentoProductsResponse>(PRODUCTS_QUERY, {
+      search: null,
+      filter: { sku: { in: batch } },
+      pageSize: batch.length,
+      currentPage: 1,
+    })
+    for (const item of data.products?.items ?? []) {
+      if (item.sku) live.set(item.sku, item)
+    }
+  }
+
+  return live
 }
 
 function productKey(item: { id?: number | string; sku?: string }): string {

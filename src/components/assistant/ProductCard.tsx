@@ -17,13 +17,21 @@ function formatPrice(price: number, currency: string) {
 }
 
 export function ProductCard({ product }: ProductCardProps) {
+  const inStock = product.inStock !== false
+
   return (
-    <Card className="animate-fade-up overflow-hidden transition-shadow hover:shadow-md">
+    <Card
+      className={`animate-fade-up overflow-hidden transition-shadow hover:shadow-md ${
+        inStock ? '' : 'opacity-90'
+      }`}
+    >
       <div className="aspect-[4/5] overflow-hidden bg-border/40">
         <img
           src={product.imageUrl}
           alt={product.name}
-          className="size-full object-cover transition-transform duration-500 hover:scale-105"
+          className={`size-full object-cover transition-transform duration-500 hover:scale-105 ${
+            inStock ? '' : 'grayscale-[35%]'
+          }`}
           loading="lazy"
         />
       </div>
@@ -31,16 +39,32 @@ export function ProductCard({ product }: ProductCardProps) {
         <div className="flex items-start justify-between gap-2">
           <div>
             <p className="text-xs text-ink-faint">{product.sku}</p>
-            <h3 className="mt-0.5 text-[15px] font-semibold leading-snug text-ink">
+            <h3
+              className={`mt-0.5 text-[15px] font-semibold leading-snug ${
+                inStock ? 'text-ink' : 'text-red-700'
+              }`}
+            >
               {product.name}
             </h3>
           </div>
-          {product.inStock && <Badge>In stock</Badge>}
+          {inStock ? (
+            <Badge>In stock</Badge>
+          ) : (
+            <Badge className="border-red-200 bg-red-50 text-red-700">
+              Out of Stock
+            </Badge>
+          )}
         </div>
 
-        <p className="text-lg font-semibold text-accent">
-          {formatPrice(product.price, product.currency)}
-        </p>
+        {inStock ? (
+          <p className="text-lg font-semibold text-accent">
+            {formatPrice(product.price, product.currency)}
+          </p>
+        ) : (
+          <p className="text-sm font-semibold uppercase tracking-wide text-red-700">
+            Out of Stock
+          </p>
+        )}
 
         <div>
           <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
