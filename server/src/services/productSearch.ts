@@ -11,6 +11,11 @@ export interface ProductSearchResult {
   totalCount: number
   matchType?: 'exact' | 'recommended' | 'mixed' | 'none'
   matchedCategories?: Array<{ id: string; name: string; path: string }>
+  matchedAttributes?: Array<{
+    code: string
+    label: string
+    optionIds: string[]
+  }>
   warning?: string
 }
 
@@ -28,12 +33,25 @@ export async function searchProducts(
   }
 
   try {
-    const { products, alternatives, totalCount, matchedCategories, matchType } =
-      await searchMagentoProducts(filters)
+    const {
+      products,
+      alternatives,
+      totalCount,
+      matchedCategories,
+      matchedAttributes,
+      matchType,
+      attributeRelaxed,
+    } = await searchMagentoProducts(filters)
 
+    const color = typeof filters.color === 'string' ? filters.color : ''
     let warning: string | undefined
     if (matchType === 'none' || (products.length === 0 && alternatives.length === 0)) {
       warning = 'No products found for your requirements.'
+    } else if (attributeRelaxed) {
+      warning =
+        color && color !== 'any'
+          ? `No exact ${color} matches in that category. Showing closely related products and alternatives.`
+          : 'No exact attribute match. Showing closely related products and alternatives.'
     } else if (matchType === 'recommended' || (products.length === 0 && alternatives.length > 0)) {
       warning =
         'No exact match found. Showing related Magento recommendations.'
@@ -46,6 +64,7 @@ export async function searchProducts(
       totalCount,
       matchType,
       matchedCategories,
+      matchedAttributes,
       warning,
     }
   } catch (error) {

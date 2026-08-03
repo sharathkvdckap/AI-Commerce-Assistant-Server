@@ -1,5 +1,6 @@
 import type { ProductFilters } from '../ai/engine.js'
 import { config } from '../config/env.js'
+import { resolveMagentoAttributeFilters } from './attributes.js'
 import { magentoGraphql } from './client.js'
 import { matchCategoriesFromSearch } from './categoryMatch.js'
 import {
@@ -335,7 +336,14 @@ export async function searchMagentoProducts(
   alternatives: CatalogProduct[]
   totalCount: number
   matchedCategories: Array<{ id: string; name: string; path: string }>
+  matchedAttributes: Array<{
+    code: string
+    label: string
+    optionIds: string[]
+  }>
   matchType: 'exact' | 'recommended' | 'mixed' | 'none'
+  /** True when products are category/type matches without the requested attribute (e.g. color). */
+  attributeRelaxed?: boolean
 }> {
   const rawQuery = String(filters.query ?? filters.category ?? '')
   const categoryMatch = await matchCategoriesFromSearch(filters, rawQuery)
@@ -348,37 +356,109 @@ export async function searchMagentoProducts(
     path,
   }))
 
+  const { filter: attributeFilters, matched: attributeHits } =
+    await resolveMagentoAttributeFilters(filters)
+  const attributeCodes = Object.keys(attributeFilters)
+  const hasAttributeFilters = attributeCodes.length > 0
+  const matchedAttributes = attributeHits.map((hit) => ({
+    code: hit.code,
+    label: hit.matchedLabel,
+    optionIds: hit.optionIds,
+  }))
+
+  // Enrich "why recommended" with live Magento attribute labels
+  const filtersWithAttrHints: ProductFilters = { ...filters }
+  for (const hit of attributeHits) {
+    if (hit.code === 'color' && !filtersWithAttrHints.color) {
+      filtersWithAttrHints.color = hit.matchedLabel
+    }
+    if (hit.code === 'material' && !filtersWithAttrHints.material) {
+      filtersWithAttrHints.material = hit.matchedLabel
+    }
+    if (hit.code === 'size' && !filtersWithAttrHints.size) {
+      filtersWithAttrHints.size = hit.matchedLabel
+    }
+    if (
+      (hit.code === 'activity' || hit.code.startsWith('style_')) &&
+      !filtersWithAttrHints.style
+    ) {
+      filtersWithAttrHints.style = hit.matchedLabel
+    }
+  }
+
   const preciseSearch =
     buildSearchQuery(filters, {
       hasCategoryFilter,
       mode: 'precise',
+      attributeFiltered: attributeCodes,
     }) || null
 
-  const filter = buildProductFilter(filters, categoryIds)
-
-  // 1) Precise search
-  let { items, totalCount } = await runProductsQuery(
-    preciseSearch,
-    filter,
+  const exactFilter = buildProductFilter(
+    filters,
+    categoryIds,
+    attributeFilters,
   )
 
-  // 2) Category-only if precise returned nothing
-  if (items.length === 0 && hasCategoryFilter) {
-    const retry = await runProductsQuery(null, filter)
+  // 1) Exact: category + Magento attribute filters (color, size, …)
+  let { items, totalCount } = await runProductsQuery(
+    preciseSearch,
+    exactFilter,
+  )
+  let attributeRelaxed = false
+
+  // 2) Category-scoped exact (still with attributes) if keyword+filter empty
+  if (items.length === 0 && hasCategoryFilter && hasAttributeFilters) {
+    const retry = await runProductsQuery(
+      null,
+      buildProductFilter(filters, categoryIds, attributeFilters),
+    )
     items = retry.items
     totalCount = retry.totalCount
   }
 
-  // 3) Keyword-only from problem text
+  // 3) Matchable: drop attribute filters (e.g. other colors in same aisle)
+  if (items.length === 0 && hasAttributeFilters) {
+    const matchableFilter = buildProductFilter(filters, categoryIds, {})
+    const matchableSearch =
+      buildSearchQuery(filters, {
+        hasCategoryFilter,
+        mode: 'precise',
+        attributeFiltered: [],
+      }) || null
+    const retry = await runProductsQuery(matchableSearch, matchableFilter)
+    if (retry.items.length === 0 && hasCategoryFilter) {
+      const categoryOnly = await runProductsQuery(null, matchableFilter)
+      items = categoryOnly.items
+      totalCount = categoryOnly.totalCount
+    } else {
+      items = retry.items
+      totalCount = retry.totalCount
+    }
+    if (items.length > 0) {
+      attributeRelaxed = true
+    }
+  }
+
+  // 4) Category-only without attributes (legacy path when no attrs requested)
+  if (items.length === 0 && hasCategoryFilter && !hasAttributeFilters) {
+    const retry = await runProductsQuery(null, exactFilter)
+    items = retry.items
+    totalCount = retry.totalCount
+  }
+
+  // 5) Keyword-only from problem text
   if (items.length === 0) {
     const keywordSearch =
-      buildSearchQuery(filters, { mode: 'precise' }) ||
+      buildSearchQuery(filters, {
+        mode: 'precise',
+        attributeFiltered: attributeCodes,
+      }) ||
       String(filters.query ?? '') ||
       null
     if (keywordSearch) {
       const retry = await runProductsQuery(
         keywordSearch,
-        buildProductFilter(filters, []),
+        buildProductFilter(filters, [], attributeFilters),
       )
       items = retry.items
       totalCount = retry.totalCount
@@ -387,7 +467,7 @@ export async function searchMagentoProducts(
 
   if (items.length > 0) {
     const products = items.map((item) =>
-      mapMagentoProduct(item, filters, matchedPaths),
+      mapMagentoProduct(item, filtersWithAttrHints, matchedPaths),
     )
     const excludeIds = new Set(items.map((item) => productKey(item)).filter(Boolean))
     const altItems = await fetchBroadAlternatives(
@@ -397,19 +477,21 @@ export async function searchMagentoProducts(
       excludeIds,
     )
     const alternatives = altItems.map((item) =>
-      mapMagentoProduct(item, filters, matchedPaths),
+      mapMagentoProduct(item, filtersWithAttrHints, matchedPaths),
     )
 
     return {
       totalCount,
-      matchType: alternatives.length > 0 ? 'mixed' : 'exact',
+      matchType: alternatives.length > 0 || attributeRelaxed ? 'mixed' : 'exact',
       matchedCategories,
+      matchedAttributes,
       products,
       alternatives,
+      attributeRelaxed,
     }
   }
 
-  // 4) No exact match — alternatives only (broader search)
+  // 6) No exact/matchable — alternatives only (broader search)
   const altItems = await fetchBroadAlternatives(
     filters,
     categoryIds,
@@ -422,9 +504,10 @@ export async function searchMagentoProducts(
       totalCount: altItems.length,
       matchType: 'recommended',
       matchedCategories,
+      matchedAttributes,
       products: [],
       alternatives: altItems.map((item) =>
-        mapMagentoProduct(item, filters, matchedPaths),
+        mapMagentoProduct(item, filtersWithAttrHints, matchedPaths),
       ),
     }
   }
@@ -433,6 +516,7 @@ export async function searchMagentoProducts(
     totalCount: 0,
     matchType: 'none',
     matchedCategories,
+    matchedAttributes,
     products: [],
     alternatives: [],
   }

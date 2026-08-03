@@ -21,12 +21,22 @@ function asNumber(value: unknown): number | undefined {
 
 /**
  * Keyword search text built from original query + collected filter answers.
+ * When Magento attribute filters are applied (e.g. color), omit those terms
+ * from the keyword string so search is not double-constrained.
  */
 export function buildSearchQuery(
   filters: ProductFilters,
-  options?: { hasCategoryFilter?: boolean; mode?: 'precise' | 'broad' },
+  options?: {
+    hasCategoryFilter?: boolean
+    mode?: 'precise' | 'broad'
+    /** Attribute codes already applied as Magento GraphQL filters. */
+    attributeFiltered?: string[]
+  },
 ): string {
   const mode = options?.mode ?? 'precise'
+  const attrFiltered = new Set(
+    (options?.attributeFiltered ?? []).map((c) => c.toLowerCase()),
+  )
 
   const technical = [
     asString(filters.part_type),
@@ -36,8 +46,8 @@ export function buildSearchQuery(
     asString(filters.symptom),
     asString(filters.latest_answer),
     asString(filters.brand),
-    asString(filters.material),
-    asString(filters.size),
+    attrFiltered.has('material') ? undefined : asString(filters.material),
+    attrFiltered.has('size') ? undefined : asString(filters.size),
   ].filter(Boolean)
 
   const lifestyle = [
@@ -45,7 +55,10 @@ export function buildSearchQuery(
     asString(filters.usage),
     asString(filters.style),
     asString(filters.fit),
-    asString(filters.color) !== 'any' ? asString(filters.color) : undefined,
+    attrFiltered.has('color') || asString(filters.color) === 'any'
+      ? undefined
+      : asString(filters.color),
+    // Gender is usually enforced via Men/Women category paths
     asString(filters.gender),
   ].filter(Boolean)
 
@@ -119,8 +132,10 @@ export function buildSearchQuery(
 export function buildProductFilter(
   filters: ProductFilters,
   categoryIds: string[] = [],
+  /** Magento attribute filters resolved to option IDs (color, size, …). */
+  attributeFilters: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  const filter: Record<string, unknown> = {}
+  const filter: Record<string, unknown> = { ...attributeFilters }
 
   const priceMin = asNumber(filters.price_min)
   const priceMax = asNumber(filters.price_max)
@@ -164,7 +179,7 @@ export function buildWhyRecommended(
 
   if (usage) reasons.push(`Suited for ${usage}`)
   if (fit) reasons.push(`${fit} fit preference`)
-  if (color) reasons.push(`Color preference: ${color}`)
+  if (color && color !== 'any') reasons.push(`Color attribute: ${color}`)
   if (brand) reasons.push(`Brand preference: ${brand}`)
   if (priceMax != null && priceMin != null) {
     reasons.push(`Within $${priceMin}–$${priceMax}`)

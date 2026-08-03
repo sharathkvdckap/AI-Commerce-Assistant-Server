@@ -287,6 +287,7 @@ assistantRouter.post('/start', async (req, res) => {
       source: result.source,
       totalCount: result.totalCount,
       matchedCategories: result.matchedCategories,
+      matchedAttributes: result.matchedAttributes,
       matchType: result.matchType,
       warning: result.warning,
     })
@@ -382,6 +383,7 @@ assistantRouter.post('/message', async (req, res) => {
       source: result.source,
       totalCount: result.totalCount,
       matchedCategories: result.matchedCategories,
+      matchedAttributes: result.matchedAttributes,
       matchType: result.matchType,
       warning: result.warning,
     })
@@ -413,6 +415,7 @@ assistantRouter.post('/search', async (req, res) => {
       source: result.source,
       totalCount: result.totalCount,
       matchedCategories: result.matchedCategories,
+      matchedAttributes: result.matchedAttributes,
       matchType: result.matchType,
       warning: result.warning,
     })

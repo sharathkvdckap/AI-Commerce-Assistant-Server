@@ -350,7 +350,7 @@ export function detectDomain(text: string, filters: ProductFilters = {}): QueryD
     return 'gift'
   }
   if (
-    /\b(pant|trouser|jacket|hoodie|shirt|tee|shoe|sneaker|clothing|apparel|fit|outfit)\b/.test(
+    /\b(pants?|trousers?|jackets?|hoodies?|shirts?|tees?|shoes?|sneakers?|clothing|apparel|fit|outfit|capri|leggings?|shorts?)\b/.test(
       lower,
     )
   ) {
@@ -514,6 +514,11 @@ export function extractHintsFromText(text: string): ProductFilters {
       'gray',
       'grey',
       'navy',
+      'brown',
+      'orange',
+      'purple',
+      'yellow',
+      'lavender',
     ]
     for (const color of colors) {
       if (new RegExp(`\\b${color}\\b`).test(lower)) {
@@ -558,6 +563,21 @@ export function isReadyToSearch(
   }
 
   if (domain === 'apparel' || domain === 'gear') {
+    // Attribute-rich first queries (e.g. "green pants women") can search immediately.
+    const hasCategory = Boolean(filters.category)
+    const hasColor =
+      Boolean(filters.color) && String(filters.color).toLowerCase() !== 'any'
+    const hasGender = Boolean(filters.gender)
+    if (
+      hasCategory &&
+      (hasColor || hasGender) &&
+      clarifyingCount(userTurnCount) === 0
+    ) {
+      return true
+    }
+    if (hasCategory && hasColor && hasGender) {
+      return true
+    }
     return (
       clarifyingCount(userTurnCount) >= 2 &&
       Boolean(filters.category || filters.usage || filters.style)
@@ -811,7 +831,7 @@ export async function runAssistantTurn(input: {
     }
 
     if (validated.action === 'search_products') {
-      // Allow early search only if we already have useful filters
+      // Allow early search when AI (or rich first query) already has useful filters
       if (
         clarifyingCount(userTurnCount) >= 1 &&
         (mergedFilters.part_type ||
@@ -819,6 +839,12 @@ export async function runAssistantTurn(input: {
           mergedFilters.motor_type)
       ) {
         return { ...validated, filters: mergedFilters }
+      }
+      if (
+        mergedFilters.category &&
+        (mergedFilters.color || mergedFilters.gender)
+      ) {
+        return forceSearch(mergedFilters)
       }
       return fallbackQuestion(mergedFilters, userTurnCount)
     }

@@ -10,6 +10,7 @@ import {
   isMagentoConfigured,
 } from './config/env.js'
 import { pingContextDatabase } from './context/db.js'
+import { listMagentoFilterableAttributes } from './magento/attributes.js'
 import { magentoGraphql } from './magento/client.js'
 import { assistantRouter } from './routes/assistant.js'
 import { contextRouter } from './routes/context.js'
@@ -45,12 +46,27 @@ app.get('/api/health', async (_req, res) => {
     ? await pingContextDatabase()
     : { ok: false, error: 'not_configured' }
 
+  let magentoAttributes:
+    | Array<{ code: string; optionCount: number; sampleLabels: string[] }>
+    | { error: string }
+    | undefined
+  if (magento.configured && magento.reachable) {
+    try {
+      magentoAttributes = await listMagentoFilterableAttributes()
+    } catch (error) {
+      magentoAttributes = {
+        error: error instanceof Error ? error.message : 'failed_to_load',
+      }
+    }
+  }
+
   res.json({
     ok: true,
     ...getModelInfo(),
     magento: {
       ...magento,
       storeCode: config.magento.storeCode,
+      filterableAttributes: magentoAttributes,
     },
     contextMemory: {
       enabled: isContextMemoryConfigured(),
@@ -58,6 +74,22 @@ app.get('/api/health', async (_req, res) => {
       ...contextMemory,
     },
   })
+})
+
+app.get('/api/magento/attributes', async (_req, res) => {
+  if (!isMagentoConfigured()) {
+    res.status(503).json({ ok: false, error: 'magento_not_configured' })
+    return
+  }
+  try {
+    const attributes = await listMagentoFilterableAttributes()
+    res.json({ ok: true, count: attributes.length, attributes })
+  } catch (error) {
+    res.status(502).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'failed_to_load',
+    })
+  }
 })
 
 app.use('/api/assistant', assistantRouter)
