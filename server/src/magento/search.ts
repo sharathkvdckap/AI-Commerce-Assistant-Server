@@ -55,6 +55,99 @@ const PRODUCTS_QUERY = `
   }
 `
 
+/** Catalog crawl for embedding sync — includes description text. */
+const CATALOG_SYNC_QUERY = `
+  query CatalogSync(
+    $search: String
+    $pageSize: Int!
+    $currentPage: Int!
+  ) {
+    products(
+      search: $search
+      filter: {}
+      pageSize: $pageSize
+      currentPage: $currentPage
+    ) {
+      total_count
+      items {
+        id
+        sku
+        name
+        url_key
+        stock_status
+        short_description { html }
+        description { html }
+        small_image {
+          url
+          label
+        }
+        price_range {
+          minimum_price {
+            final_price {
+              value
+              currency
+            }
+            regular_price {
+              value
+              currency
+            }
+          }
+        }
+      }
+    }
+  }
+`
+
+export interface MagentoCatalogSyncItem extends MagentoProductItem {
+  short_description?: { html?: string | null } | null
+  description?: { html?: string | null } | null
+}
+
+interface MagentoCatalogSyncResponse {
+  products: {
+    total_count: number
+    items: MagentoCatalogSyncItem[]
+  }
+}
+
+/**
+ * Page through the Magento catalog for embedding sync.
+ * Caps at the same safety limit as search (5000 products).
+ */
+export async function* iterateMagentoCatalogForSync(
+  pageSize = BATCH_PAGE_SIZE,
+): AsyncGenerator<{
+  items: MagentoCatalogSyncItem[]
+  page: number
+  totalCount: number
+}> {
+  const batchSize = Math.min(Math.max(pageSize, 1), BATCH_PAGE_SIZE)
+  let currentPage = 1
+  let totalCount = 0
+  let fetched = 0
+
+  while (currentPage <= MAX_FETCH_PAGES) {
+    const data = await magentoGraphql<MagentoCatalogSyncResponse>(
+      CATALOG_SYNC_QUERY,
+      {
+        search: null,
+        pageSize: batchSize,
+        currentPage,
+      },
+    )
+    const items = data.products?.items ?? []
+    totalCount = data.products?.total_count ?? fetched + items.length
+    fetched += items.length
+
+    yield { items, page: currentPage, totalCount }
+
+    if (items.length === 0 || fetched >= totalCount) {
+      break
+    }
+    currentPage += 1
+  }
+}
+
 /** Per-request batch size (Magento GraphQL often caps around 100). */
 const BATCH_PAGE_SIZE = 100
 /** Safety cap so a huge catalog cannot hang the request. */

@@ -39,4 +39,4 @@ export interface CatalogProduct {
   inStock: boolean
 }
 
-export type ProductSource = 'magento'
+export type ProductSource = 'magento' | 'semantic' | 'hybrid'

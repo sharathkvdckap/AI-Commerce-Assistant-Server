@@ -8,12 +8,14 @@ import {
   getMagentoGraphqlUrl,
   isContextMemoryConfigured,
   isMagentoConfigured,
+  isSemanticConfigured,
 } from './config/env.js'
-import { pingContextDatabase } from './context/db.js'
+import { pingContextDatabase, pingSemanticDatabase } from './context/db.js'
 import { listMagentoFilterableAttributes } from './magento/attributes.js'
 import { magentoGraphql } from './magento/client.js'
 import { assistantRouter } from './routes/assistant.js'
 import { contextRouter } from './routes/context.js'
+import { semanticRouter } from './routes/semantic.js'
 
 const app = express()
 app.use(cors())
@@ -46,6 +48,10 @@ app.get('/api/health', async (_req, res) => {
     ? await pingContextDatabase()
     : { ok: false, error: 'not_configured' }
 
+  const semantic = isSemanticConfigured()
+    ? await pingSemanticDatabase()
+    : { ok: false, error: 'not_configured' }
+
   let magentoAttributes:
     | Array<{ code: string; optionCount: number; sampleLabels: string[] }>
     | { error: string }
@@ -73,6 +79,14 @@ app.get('/api/health', async (_req, res) => {
       similarityThreshold: config.context.similarityThreshold,
       ...contextMemory,
     },
+    semantic: {
+      enabled: isSemanticConfigured(),
+      embeddingModel: config.context.embeddingModel,
+      topK: config.semantic.topK,
+      minScore: config.semantic.minScore,
+      fallbackMinScore: config.semantic.fallbackMinScore,
+      ...semantic,
+    },
   })
 })
 
@@ -94,6 +108,7 @@ app.get('/api/magento/attributes', async (_req, res) => {
 
 app.use('/api/assistant', assistantRouter)
 app.use('/api/context', contextRouter)
+app.use('/api/semantic', semanticRouter)
 
 app.listen(config.port, () => {
   const info = getModelInfo()
@@ -104,5 +119,8 @@ app.listen(config.port, () => {
   )
   console.log(
     `Context memory: ${isContextMemoryConfigured() ? 'enabled' : 'disabled'}`,
+  )
+  console.log(
+    `Semantic search: ${isSemanticConfigured() ? 'enabled' : 'disabled'}`,
   )
 })

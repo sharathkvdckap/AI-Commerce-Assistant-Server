@@ -33,14 +33,16 @@ import { conversationMemoryService } from './services/ConversationMemoryService.
 import { contextRecommendationService } from './services/ContextRecommendationService.js'
 import { semanticHistorySearchService } from './services/SemanticHistorySearchService.js'
 import { userPreferenceService } from './services/UserPreferenceService.js'
-import { pingContextDatabase, getContextPool, closeContextPool } from './db.js'
+import { pingContextDatabase, getContextPool, closeContextPool, pingSemanticDatabase, getDbPool } from './db.js'
 import { embedText, toPgVectorLiteral } from './embeddings.js'
 
 export type * from './types.js'
 
 export {
   pingContextDatabase,
+  pingSemanticDatabase,
   getContextPool,
+  getDbPool,
   closeContextPool,
   embedText,
   toPgVectorLiteral,
