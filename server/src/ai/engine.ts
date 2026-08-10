@@ -1,7 +1,11 @@
 import { ChatOllama } from '@langchain/ollama'
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { z } from 'zod'
-import { getGiftCategoryOptions } from '../magento/categoryMatch.js'
+import {
+  getApparelCategoryOptions,
+  preferredApparelCategoryNames,
+  styleOptionsForCategory,
+} from '../magento/categoryMatch.js'
 import { SYSTEM_PROMPT } from './prompt.js'
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434'
@@ -40,7 +44,6 @@ export type ProductFilters = z.infer<typeof filtersSchema>
 export type QueryDomain =
   | 'industrial'
   | 'apparel'
-  | 'gift'
   | 'gear'
   | 'general'
   | 'sleeves'
@@ -262,8 +265,36 @@ function isJunkOptions(options: string[]): boolean {
   return meaningful.length < 2
 }
 
+/** True when the query clearly wants clothing / activewear (not watches/bags). */
+function isClothesIntentQuery(query: string): boolean {
+  return /\b(gym|fitness|workout|athletic|training|clothes|clothing|apparel|wear|outfit|outfits|tees?|t-?shirts?|shirts?|shorts?|pants?|trousers?|hoodies?|sweatshirts?|jackets?|leggings?|capris?)\b/i.test(
+    query,
+  )
+}
+
+/**
+ * Reject option sets that ignore the customer's domain
+ * (e.g. Watches/Bags chips for "gym clothes").
+ */
+function optionsMismatchQuery(options: string[], query: string): boolean {
+  if (!query.trim() || options.length < 2) return false
+  if (!isClothesIntentQuery(query)) return false
+  if (/\b(watches?|bags?|backpack|duffel)\b/i.test(query)) return false
+
+  const accessoryHits = options.filter((o) =>
+    /\b(watches?|bags?|messenger|duffel|crossbody|tote)\b/i.test(o),
+  ).length
+  const apparelHits = options.filter((o) =>
+    /\b(tees?|shorts?|pants?|jackets?|hoodies?|sweatshirts?|fitness)\b/i.test(o),
+  ).length
+  return accessoryHits >= 2 && apparelHits < 2
+}
+
 /** Sensible chip options when the model asks a known question without choices. */
-function defaultOptionsForQuestion(question: string): string[] | null {
+function defaultOptionsForQuestion(
+  question: string,
+  query = '',
+): string[] | null {
   const q = question.toLowerCase()
 
   if (/\bwatch/.test(q)) {
@@ -293,10 +324,16 @@ function defaultOptionsForQuestion(question: string): string[] | null {
   if (/\b(use|usage|mainly for|activity)\b/.test(q)) {
     return ['Training', 'Running', 'Casual', 'Everyday']
   }
-  if (/\b(gift|type of product|looking for|considering)\b/.test(q)) {
-    return ['Watches', 'Bags', 'Jackets', 'Hoodies & Sweatshirts']
+  if (/\b(type of product|looking for|considering)\b/.test(q)) {
+    return preferredApparelCategoryNames(query || question).slice(0, 5)
   }
-  if (/\b(motor|equipment)\b/.test(q)) {
+  if (/\b(kind of|style of|type of)\b/.test(q)) {
+    const fromQuery = query.trim()
+      ? preferredApparelCategoryNames(query)
+      : null
+    if (fromQuery && fromQuery.length >= 2) return fromQuery.slice(0, 5)
+  }
+  if (/\b(motor|equipment)\b/.test(q) && !/\bfitness\b/.test(q)) {
     return ['AC induction motor', 'Servo / stepper', 'Gear motor', 'Not sure']
   }
   if (/\b(component|replacement|part)\b/.test(q)) {
@@ -314,6 +351,9 @@ function defaultOptionsForQuestion(question: string): string[] | null {
     return ['Small', 'Medium', 'Large', 'Not sure']
   }
   if (/\b(type|kind|category|style)\b/.test(q)) {
+    if (query.trim()) {
+      return preferredApparelCategoryNames(query).slice(0, 5)
+    }
     return ['Show matching products', 'Narrow it down more', 'Not sure']
   }
 
@@ -336,7 +376,11 @@ function mergeFilters(
 }
 
 export function detectDomain(text: string, filters: ProductFilters = {}): QueryDomain {
-  if (filters.domain) return String(filters.domain) as QueryDomain
+  const existing = filters.domain ? String(filters.domain) : ''
+  // Ignore legacy static "gift" domain — gift intent is handled by the AI
+  if (existing && existing !== 'gift') {
+    return existing as QueryDomain
+  }
   const lower = text.toLowerCase()
 
   if (
@@ -346,11 +390,8 @@ export function detectDomain(text: string, filters: ProductFilters = {}): QueryD
   ) {
     return 'industrial'
   }
-  if (/\bgift\b|\bpresent\b|\bbirthday\b|\banniversary\b|\bfor my (husband|wife|dad|mom)\b/.test(lower)) {
-    return 'gift'
-  }
   if (
-    /\b(pants?|trousers?|jackets?|hoodies?|shirts?|tees?|shoes?|sneakers?|clothing|apparel|fit|outfit|capri|leggings?|shorts?)\b/.test(
+    /\b(pants?|trousers?|jackets?|hoodies?|shirts?|tees?|shoes?|sneakers?|clothing|clothes|apparel|wear|fit|outfit|outfits|capri|leggings?|shorts?|gym|workout|athletic)\b/.test(
       lower,
     )
   ) {
@@ -399,25 +440,14 @@ export function extractHintsFromText(text: string): ProductFilters {
     if (/gear\s*motor|12v/.test(lower)) filters.motor_type = 'gear motor'
   }
 
-  if (/\bgift\b|\bpresent\b|\bbirthday\b|\banniversary\b/.test(lower)) {
-    filters.occasion = 'gift'
-  }
-
-  if (
-    /\b(husband|boyfriend|dad|father|son|brother|him|his|male)\b/.test(lower) ||
-    /\bmen'?s?\b/.test(lower)
-  ) {
+  // Explicit apparel gender only (men's / women's) — gift recipient comes from the AI
+  if (/\bmen'?s?\b/.test(lower) || /\bmale\b/.test(lower)) {
     filters.gender = 'men'
-    if (/\bhusband\b/.test(lower)) filters.recipient = 'husband'
   } else if (
-    /\b(wife|girlfriend|mom|mother|daughter|sister|hers|female|ladies|woman)\b/.test(
-      lower,
-    ) ||
     /\bwomen'?s?\b/.test(lower) ||
-    /\bher\b/.test(lower)
+    /\b(female|ladies)\b/.test(lower)
   ) {
     filters.gender = 'women'
-    if (/\bwife\b/.test(lower)) filters.recipient = 'wife'
   }
 
   // Short answers / option clicks — store as latest_answer for search keywords
@@ -431,7 +461,7 @@ export function extractHintsFromText(text: string): ProductFilters {
     )
   ) {
     filters.category = text.trim()
-  } else if (domain === 'apparel' || domain === 'gear' || domain === 'gift') {
+  } else if (domain === 'apparel' || domain === 'gear') {
     if (/\b(watches?|watch)\b/.test(lower)) filters.category = 'Watches'
     else if (/\b(bags?|backpack|duffel)\b/.test(lower)) filters.category = 'Bags'
     else if (/\b(jackets?|coat)\b/.test(lower)) filters.category = 'Jackets'
@@ -439,6 +469,12 @@ export function extractHintsFromText(text: string): ProductFilters {
       filters.category = 'Pants'
     } else if (/\b(hoodie|sweatshirt)s?\b/.test(lower)) {
       filters.category = 'Hoodies & Sweatshirts'
+    } else if (/\b(shorts?)\b/.test(lower)) {
+      filters.category = 'Shorts'
+    } else if (/\b(tees?|t-?shirts?)\b/.test(lower)) {
+      filters.category = 'Tees'
+    } else if (/\b(yoga|fitness\s*equipment|dumbbell|kettlebell)\b/.test(lower)) {
+      filters.category = 'Fitness Equipment'
     }
   }
 
@@ -454,7 +490,11 @@ export function extractHintsFromText(text: string): ProductFilters {
   else if (/slim/.test(lower)) filters.fit = 'slim'
   else if (/regular\s*fit/.test(lower)) filters.fit = 'regular'
 
-  if (/^(training|train)$/.test(lower) || /\btraining\b/.test(lower)) {
+  if (
+    /^(training|train)$/.test(lower) ||
+    /\btraining\b/.test(lower) ||
+    /\b(gym|workout|athletic)\b/.test(lower)
+  ) {
     filters.usage = 'training'
   } else if (/^(running|run)$/.test(lower) || /\brunning\b/.test(lower)) {
     filters.usage = 'running'
@@ -464,7 +504,7 @@ export function extractHintsFromText(text: string): ProductFilters {
     filters.style = text.trim().toLowerCase()
   }
 
-  // Watch type option clicks
+  // Watch / bag / hoodie style option clicks
   if (
     /^(analog|digital|smartwatch|sport|luxury\s*\/\s*dress|luxury|dress)$/i.test(
       text.trim(),
@@ -474,12 +514,39 @@ export function extractHintsFromText(text: string): ProductFilters {
     filters.category = filters.category ?? 'Watches'
   }
 
-  // Bag type option clicks
   if (
     /^(messenger|backpack|tote|duffel|crossbody)$/i.test(text.trim())
   ) {
     filters.style = text.trim().toLowerCase()
     filters.category = filters.category ?? 'Bags'
+  }
+
+  if (
+    /^(pullover|zip-up|lightweight|fleece)$/i.test(text.trim())
+  ) {
+    filters.style = text.trim().toLowerCase()
+    filters.category = filters.category ?? 'Hoodies & Sweatshirts'
+  }
+
+  if (
+    /^(bomber|puffer|rain jacket|denim|softshell)$/i.test(text.trim())
+  ) {
+    filters.style = text.trim().toLowerCase()
+    filters.category = filters.category ?? 'Jackets'
+  }
+
+  if (
+    /^(joggers|chinos|track pants|jeans)$/i.test(text.trim())
+  ) {
+    filters.style = text.trim().toLowerCase()
+    filters.category = filters.category ?? 'Pants'
+  }
+
+  if (
+    /^(crew neck|v-neck|tank|long sleeve)$/i.test(text.trim())
+  ) {
+    filters.style = text.trim().toLowerCase()
+    filters.category = filters.category ?? 'Tees'
   }
 
   if (/under\s*\$?\s*50|^under\s*\$50$/.test(lower)) {
@@ -504,7 +571,7 @@ export function extractHintsFromText(text: string): ProductFilters {
     if (above) filters.price_min = Number(above[1])
   }
 
-  if (domain === 'apparel' || domain === 'gift' || domain === 'gear') {
+  if (domain === 'apparel' || domain === 'gear') {
     const colors = [
       'red',
       'blue',
@@ -553,12 +620,6 @@ export function isReadyToSearch(
     return (
       clarifyingCount(userTurnCount) >= 2 &&
       Boolean(filters.part_type || filters.motor_type || filters.category)
-    )
-  }
-
-  if (domain === 'gift') {
-    return (
-      clarifyingCount(userTurnCount) >= 2 && Boolean(filters.category)
     )
   }
 
@@ -638,33 +699,42 @@ async function fallbackQuestion(
     }
   }
 
-  if (domain === 'gift' && !filters.category) {
-    const who =
-      filters.recipient === 'husband'
-        ? 'your husband'
-        : filters.recipient === 'wife'
-          ? 'your wife'
-          : 'them'
-    let options = await getGiftCategoryOptions(String(filters.gender ?? ''))
-    if (options.length < 2) {
-      options = ['Watches', 'Bags', 'Jackets', 'Hoodies & Sweatshirts']
-    }
-    return {
-      action: 'ask_question',
-      message: `I’d love to help you pick a gift for ${who}.`,
-      question: 'What type of gift are you considering?',
-      options,
-      filters: { ...filters, domain: 'gift' },
-    }
-  }
-
   if ((domain === 'apparel' || domain === 'gear') && !filters.category) {
+    const queryText = String(filters.query ?? '')
+    let options = await getApparelCategoryOptions(
+      queryText,
+      String(filters.gender ?? ''),
+    )
+    if (options.length < 2) {
+      options = preferredApparelCategoryNames(queryText).slice(0, 5)
+    }
     return {
       action: 'ask_question',
       message: 'I can help narrow that down.',
       question: 'What type of product are you looking for?',
-      options: ['Pants', 'Jackets', 'Bags', 'Watches', 'Hoodies & Sweatshirts'],
+      options,
       filters: { ...filters, domain },
+    }
+  }
+
+  // Category already known (e.g. Watches / Bags / Hoodies) → ask related style tags
+  if (
+    (domain === 'apparel' || domain === 'gear') &&
+    filters.category &&
+    !filters.style &&
+    step < MAX_CLARIFYING_QUESTIONS
+  ) {
+    const styleOptions = styleOptionsForCategory(String(filters.category))
+    if (styleOptions && styleOptions.length >= 2) {
+      const cat = String(filters.category)
+      const label = cat.replace(/s$/i, '').toLowerCase()
+      return {
+        action: 'ask_question',
+        message: 'Great choice.',
+        question: `What kind of ${label} are you looking for?`,
+        options: styleOptions,
+        filters: { ...filters, domain },
+      }
     }
   }
 
@@ -679,7 +749,7 @@ async function fallbackQuestion(
   }
 
   if (
-    (domain === 'apparel' || domain === 'gift' || domain === 'gear') &&
+    (domain === 'apparel' || domain === 'gear') &&
     !filters.color &&
     step < MAX_CLARIFYING_QUESTIONS
   ) {
@@ -693,7 +763,7 @@ async function fallbackQuestion(
   }
 
   if (
-    (domain === 'apparel' || domain === 'gift' || domain === 'gear') &&
+    (domain === 'apparel' || domain === 'gear') &&
     filters.price_min == null &&
     filters.price_max == null &&
     step < MAX_CLARIFYING_QUESTIONS
@@ -879,13 +949,15 @@ export async function runAssistantTurn(input: {
       return fallbackQuestion(mergedFilters, userTurnCount)
     }
 
-    // Replace empty/junk options (e.g. Yes / No) with question-aware choices
-    if (isJunkOptions(validated.options)) {
-      const defaults = defaultOptionsForQuestion(validated.question) ?? [
-        'Show matching products',
-        'Narrow it down more',
-        'Not sure',
-      ]
+    const queryText = String(mergedFilters.query ?? input.query)
+    // Replace empty/junk or off-domain options with query-aware choices
+    if (
+      isJunkOptions(validated.options) ||
+      optionsMismatchQuery(validated.options, queryText)
+    ) {
+      const defaults =
+        defaultOptionsForQuestion(validated.question, queryText) ??
+        preferredApparelCategoryNames(queryText).slice(0, 5)
       return {
         ...validated,
         options: defaults,

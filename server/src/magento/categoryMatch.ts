@@ -343,24 +343,102 @@ export async function matchCategoriesFromSearch(
 }
 
 /**
- * Build gift-type options from Magento categories for a recipient gender.
+ * Preferred Magento category / style chip names, biased by customer query.
+ * Broad clothes → apparel leaves; specific product → related subtypes.
  */
-export async function getGiftCategoryOptions(
-  gender?: string,
-): Promise<string[]> {
-  const all = await getMagentoCategories()
-  const genderKey = String(gender ?? '').toLowerCase()
+export function preferredApparelCategoryNames(query: string): string[] {
+  const lower = query.toLowerCase()
 
-  const preferredNames = [
-    'Watches',
-    'Bags',
-    'Hoodies & Sweatshirts',
-    'Jackets',
-    'Fitness Equipment',
+  if (/\b(watches?|watch)\b/.test(lower)) {
+    return ['Analog', 'Digital', 'Smartwatch', 'Sport', 'Luxury / dress']
+  }
+  if (/\b(bags?|backpack|duffel|tote|messenger|crossbody)\b/.test(lower)) {
+    return ['Messenger', 'Backpack', 'Tote', 'Duffel', 'Crossbody']
+  }
+  if (/\b(hoodie|sweatshirt)s?\b/.test(lower)) {
+    return ['Pullover', 'Zip-up', 'Lightweight', 'Fleece']
+  }
+  if (/\b(jackets?|coat)\b/.test(lower)) {
+    return ['Bomber', 'Puffer', 'Rain jacket', 'Denim', 'Softshell']
+  }
+  if (/\b(pants?|trousers?|joggers?)\b/.test(lower)) {
+    return ['Joggers', 'Chinos', 'Track pants', 'Jeans']
+  }
+  if (/\b(shorts?)\b/.test(lower)) {
+    return ['Shorts', 'Pants', 'Tees']
+  }
+  if (/\b(tees?|t-?shirts?|shirts?)\b/.test(lower)) {
+    return ['Tees', 'Hoodies & Sweatshirts', 'Shorts']
+  }
+  if (/\b(yoga|fitness\s*equipment|dumbbell|kettlebell|mat)\b/.test(lower)) {
+    return ['Fitness Equipment', 'Tees', 'Shorts', 'Pants', 'Hoodies & Sweatshirts']
+  }
+  if (/\b(shoes?|sneakers?|footwear)\b/.test(lower)) {
+    return ['Training', 'Running', 'Casual', 'Everyday']
+  }
+  if (
+    /\b(gym|fitness|workout|athletic|training|clothes|clothing|apparel|wear|outfit|outfits)\b/.test(
+      lower,
+    )
+  ) {
+    return [
+      'Tees',
+      'Shorts',
+      'Pants',
+      'Hoodies & Sweatshirts',
+      'Jackets',
+      'Fitness Equipment',
+    ]
+  }
+
+  // Generic apparel/gear browse — clothes-first, not accessory-heavy
+  return [
     'Tees',
     'Pants',
+    'Shorts',
+    'Hoodies & Sweatshirts',
+    'Jackets',
+    'Bags',
+    'Watches',
   ]
+}
 
+/** Style / subtype chips once a Magento category (or clear product type) is known. */
+export function styleOptionsForCategory(category: string): string[] | null {
+  const c = category.toLowerCase()
+  if (/\bwatch/.test(c)) {
+    return ['Analog', 'Digital', 'Smartwatch', 'Sport', 'Luxury / dress']
+  }
+  if (/\bbag/.test(c)) {
+    return ['Messenger', 'Backpack', 'Tote', 'Duffel', 'Crossbody']
+  }
+  if (/\bhoodie|sweatshirt/.test(c)) {
+    return ['Pullover', 'Zip-up', 'Lightweight', 'Fleece']
+  }
+  if (/\bjacket/.test(c)) {
+    return ['Bomber', 'Puffer', 'Rain jacket', 'Denim', 'Softshell']
+  }
+  if (/\bpant|trouser/.test(c)) {
+    return ['Joggers', 'Chinos', 'Track pants', 'Jeans']
+  }
+  if (/\btee|shirt/.test(c)) {
+    return ['Crew neck', 'V-neck', 'Tank', 'Long sleeve']
+  }
+  if (/\bshort/.test(c)) {
+    return ['Training shorts', 'Running shorts', 'Casual shorts']
+  }
+  if (/\bfitness/.test(c)) {
+    return ['Yoga', 'Weights', 'Cardio accessories', 'Not sure']
+  }
+  return null
+}
+
+function rankCategoryOptionsByPreference(
+  all: FlatCategory[],
+  preferredNames: string[],
+  gender?: string,
+): string[] {
+  const genderKey = String(gender ?? '').toLowerCase()
   const scored: Array<{ name: string; score: number }> = []
 
   for (const cat of all) {
@@ -380,7 +458,8 @@ export async function getGiftCategoryOptions(
       const ok =
         path.includes('women') ||
         cat.nameLower === 'bags' ||
-        cat.nameLower === 'watches'
+        cat.nameLower === 'watches' ||
+        cat.nameLower === 'fitness equipment'
       if (!ok) continue
       if (/\bmen\b/.test(path) && !path.includes('women')) continue
     }
@@ -388,9 +467,10 @@ export async function getGiftCategoryOptions(
     const pref = preferredNames.findIndex(
       (n) => n.toLowerCase() === cat.nameLower,
     )
+    if (pref === -1) continue
     scored.push({
       name: cat.name,
-      score: pref === -1 ? 0 : 20 - pref,
+      score: preferredNames.length - pref,
     })
   }
 
@@ -399,8 +479,48 @@ export async function getGiftCategoryOptions(
     unique.set(row.name, Math.max(unique.get(row.name) ?? 0, row.score))
   }
 
-  return [...unique.entries()]
+  const ranked = [...unique.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([name]) => name)
-    .slice(0, 5)
+
+  // Always return preferred labels even if Magento tree is empty / mismatched
+  if (ranked.length < 2) {
+    return preferredNames.slice(0, 5)
+  }
+  return ranked.slice(0, 5)
+}
+
+/**
+ * Build gift-type options from Magento categories for a recipient gender.
+ */
+export async function getGiftCategoryOptions(
+  gender?: string,
+): Promise<string[]> {
+  const all = await getMagentoCategories()
+  const preferredNames = [
+    'Watches',
+    'Bags',
+    'Hoodies & Sweatshirts',
+    'Jackets',
+    'Fitness Equipment',
+    'Tees',
+    'Pants',
+  ]
+  return rankCategoryOptionsByPreference(all, preferredNames, gender)
+}
+
+/**
+ * Build product-type chips for apparel/gear from Magento, biased by the query.
+ */
+export async function getApparelCategoryOptions(
+  query: string,
+  gender?: string,
+): Promise<string[]> {
+  const preferredNames = preferredApparelCategoryNames(query)
+  try {
+    const all = await getMagentoCategories()
+    return rankCategoryOptionsByPreference(all, preferredNames, gender)
+  } catch {
+    return preferredNames.slice(0, 5)
+  }
 }
