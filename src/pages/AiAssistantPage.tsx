@@ -17,6 +17,8 @@ export function AiAssistantPage() {
     hasStarted,
     error,
     pendingContext,
+    sessionId,
+    searchId,
     answerQuestion,
     submitAnswer,
     continuePreviousContext,
@@ -42,6 +44,8 @@ export function AiAssistantPage() {
           hasStarted={hasStarted}
           error={error}
           pendingContext={pendingContext}
+          sessionId={sessionId}
+          searchId={searchId}
           onAnswer={answerQuestion}
           onSend={submitAnswer}
           onContinueContext={() => {

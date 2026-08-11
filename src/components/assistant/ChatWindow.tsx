@@ -33,6 +33,8 @@ interface ChatWindowProps {
   onContinueContext: () => void
   onStartNewFromContext: () => void
   onReset: () => void
+  sessionId?: string | null
+  searchId?: string | null
 }
 
 export function ChatWindow({
@@ -54,6 +56,8 @@ export function ChatWindow({
   onContinueContext,
   onStartNewFromContext,
   onReset,
+  sessionId,
+  searchId,
 }: ChatWindowProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const hasResults = products.length > 0 || alternatives.length > 0
@@ -136,6 +140,8 @@ export function ChatWindow({
               alternatives={alternatives}
               source={source}
               matchType={matchType}
+              sessionId={sessionId}
+              searchId={searchId}
             />
             {warning && (
               <div className="ml-0 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 sm:ml-11">
