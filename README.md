@@ -243,7 +243,13 @@ php bin/magento cache:flush
 | Enable AI Commerce Assistant| Yes |
 | AI API Base URL | `http://127.0.0.1:3001` |
 | Redirect to External Assistant UI (legacy) | No |
- 
+
+With UI + API running, search from the Magento storefront should land on:
+
+`http://localhost:5173/ai-assistant`
+
+Screenshots (config, search icon, PLP flows, videos): **[magento/DEMO.md](./magento/DEMO.md)**.
+
 ---
 
 ## API overview
@@ -333,6 +339,8 @@ AI-Commerce-Assistant/
 │       ├── services/         # productSearch, contextReplay
 │       ├── session/          # in-memory chat sessions
 │       └── scripts/          # migrate, syncEmbeddings
+├── DEMO.md                     # Node / app run screenshots
+├── magento/DEMO.md             # Magento admin + storefront demos
 └── HACKATHON_DOCUMENTATION.md  # Architecture & demo deep dive
 ```
 
@@ -342,7 +350,7 @@ Chat sessions are **in-memory** (lost on API restart). Product truth always come
 
 ## Demo ideas
 
-Full screenshots + Jumpshare videos (apparel, fitness, industrial): **[DEMO.md](./DEMO.md)**.
+Screenshots: **[DEMO.md](./DEMO.md)** (Node) · **[magento/DEMO.md](./magento/DEMO.md)** (Magento)
 
 | Scenario | Try |
 | -------- | --- |
@@ -371,6 +379,24 @@ Confirm `/api/health` shows Magento reachable (and semantic/context green when e
 
 ## Further reading
 
-- [DEMO.md](./DEMO.md) — screenshots & demo videos (apparel, fitness, industrial)
+- [DEMO.md](./DEMO.md) — **Node / app** demo screenshots (frontend, backend, embeddings sync)
+- [magento/DEMO.md](./magento/DEMO.md) — **Magento** demo screenshots & videos (config, search, PLP, apparel / fitness / industrial)
 - [HACKATHON_DOCUMENTATION.md](./HACKATHON_DOCUMENTATION.md) — architecture, retrieval flows, business context, roadmap
 - Magento admin: **Stores → Configuration → Klizer → AI Commerce Assistant** (search redirect module)
+
+### Demo screenshots — Node setup
+
+![Frontend UI run](https://i.ibb.co/pjyCtNw1/image.png)
+
+*Frontend UI run (`npm run dev`)*
+
+![AI Commerce Assistant app UI](https://i.ibb.co/4RFMNNVK/image.png)
+
+*AI Commerce Assistant app running for test*
+
+![Backend run](https://i.ibb.co/5g3q0B0P/image.png)
+
+*Backend run (`cd server && npm run dev`)*
+
+More Node shots: **[DEMO.md](./DEMO.md)**. Magento storefront / admin shots: **[magento/DEMO.md](./magento/DEMO.md)**.
+
