@@ -134,8 +134,6 @@ Vite proxies `/api` → `http://127.0.0.1:3001`.
 
 *Backend console: Search Analytics enabled (Postgres + `db:migrate:analytics`)*
 
-More Node screenshots: **[DEMO.md](./DEMO.md)**.
-
 ---
 
 ## Environment reference
@@ -312,8 +310,7 @@ AI-Commerce-Assistant/
 │       ├── semantic/
 │       ├── services/
 │       ├── session/
-│       └── scripts/
-├── DEMO.md                   # Node / app screenshots
+│       └── scripts/                 # Node / app screenshots
 ```
 
 Chat sessions are **in-memory** (lost on API restart). Product truth always comes from Magento GraphQL.
@@ -321,8 +318,6 @@ Chat sessions are **in-memory** (lost on API restart). Product truth always come
 ---
 
 ## Demo ideas
-
-**Node screenshots:** [DEMO.md](./DEMO.md)
 
 | Scenario | Try |
 | -------- | --- |
@@ -349,8 +344,4 @@ Confirm `/api/health` before demos.
 | Analytics CTR stays 0% | `db:migrate:analytics`; click **View Product**; refresh `/analytics` |
 | Wrong clarification style | Update `server/domain-config.json` |
 
----
-
-## Further reading
-
-- [DEMO.md](./DEMO.md) — Node / app run screenshots     
+---   
