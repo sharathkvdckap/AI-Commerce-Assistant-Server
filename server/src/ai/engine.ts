@@ -2,7 +2,16 @@ import { ChatOllama } from '@langchain/ollama'
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { z } from 'zod'
 import { getGiftCategoryOptions } from '../magento/categoryMatch.js'
-import { SYSTEM_PROMPT } from './prompt.js'
+import { extractPriceBounds } from '../magento/priceFilter.js'
+import {
+  applyFilterHints,
+  buildMerchantSystemAppendix,
+  findDomainDefinition,
+  filterHasValue,
+  getDomainConfig,
+  isClarifyStepNeeded,
+} from '../config/domainConfig.js'
+import { buildSystemPrompt } from './prompt.js'
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434'
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:3b'
@@ -37,19 +46,8 @@ export const aiResponseSchema = z.discriminatedUnion('action', [
 export type AiResponse = z.infer<typeof aiResponseSchema>
 export type ProductFilters = z.infer<typeof filtersSchema>
 
-export type QueryDomain =
-  | 'industrial'
-  | 'apparel'
-  | 'gift'
-  | 'gear'
-  | 'general'
-  | 'sleeves'
-  | 'hoodies & sweatshirts'
-  | 'jackets'
-  | 'pants'
-  | 'jeans'
-  | 'watches'
-  | 'Gym & Fitness'
+/** Domain id from domain-config.json (or built-in heuristics). */
+export type QueryDomain = string
 
 function extractJson(raw: string): unknown {
   const trimmed = raw.trim()
@@ -232,6 +230,23 @@ function flattenSearchCriteria(
       continue
     }
 
+    if (key === 'budget') {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        filters.price_max = value
+        continue
+      }
+      if (typeof value === 'string' && value.trim()) {
+        const bounds = extractPriceBounds(value)
+        if (bounds.price_min != null) filters.price_min = bounds.price_min
+        if (bounds.price_max != null) filters.price_max = bounds.price_max
+        else {
+          const n = Number(value.replace(/[^0-9.]/g, ''))
+          if (Number.isFinite(n)) filters.price_max = n
+        }
+        continue
+      }
+    }
+
     if (
       typeof value === 'string' ||
       typeof value === 'number' ||
@@ -337,6 +352,10 @@ function mergeFilters(
 
 export function detectDomain(text: string, filters: ProductFilters = {}): QueryDomain {
   if (filters.domain) return String(filters.domain) as QueryDomain
+
+  const fromConfig = findDomainDefinition(text)
+  if (fromConfig) return fromConfig.id
+
   const lower = text.toLowerCase()
 
   if (
@@ -349,14 +368,32 @@ export function detectDomain(text: string, filters: ProductFilters = {}): QueryD
   if (/\bgift\b|\bpresent\b|\bbirthday\b|\banniversary\b|\bfor my (husband|wife|dad|mom)\b/.test(lower)) {
     return 'gift'
   }
+
+  // Clothing nouns win over gym/fitness context (e.g. "suits for the gym" → apparel, not equipment)
+  const apparelNoun =
+    /\b(pants?|trousers?|jackets?|hoodies?|sweatshirts?|shirts?|tees?|shoes?|sneakers?|clothing|apparel|outfit|capri|leggings?|shorts?|suits?|tracksuits?|activewear|athleisure|joggers?|tanks?|tops?|bottoms?|dress|dresses|skirt|skirts)\b/.test(
+      lower,
+    ) ||
+    /\b(gym|workout|training)\s+(clothes|clothing|wear|outfit|suits?|pants?|shorts?)\b/.test(
+      lower,
+    ) ||
+    /\b(clothes|clothing|wear|outfit|suits?|pants?|shorts?)\s+(for\s+)?(the\s+)?(gym|workout|training)\b/.test(
+      lower,
+    )
+
+  if (apparelNoun) {
+    return 'apparel'
+  }
+
+  // Equipment / accessories only when no clothing noun
   if (
-    /\b(pants?|trousers?|jackets?|hoodies?|shirts?|tees?|shoes?|sneakers?|clothing|apparel|fit|outfit|capri|leggings?|shorts?)\b/.test(
+    /\b(bag|watch|fitness\s+equipment|yoga\s+mat|backpack|duffel|treadmill|dumbbell|kettlebell|exercise\s+bike|cycle\s+equipment)\b/.test(
       lower,
     )
   ) {
-    return 'apparel'
+    return 'gear'
   }
-  if (/\b(bag|watch|fitness|yoga|backpack|duffel)\b/.test(lower)) {
+  if (/\b(fitness|yoga)\b/.test(lower) && !/\b(clothes|clothing|wear|suit|pant|hoodie|shirt)\b/.test(lower)) {
     return 'gear'
   }
   return 'general'
@@ -382,6 +419,14 @@ export function extractHintsFromText(text: string): ProductFilters {
   if (domain !== 'general') {
     filters.domain = domain
   }
+
+  // Merchant domain-config.json hints (global + matched domain)
+  const cfg = getDomainConfig()
+  applyFilterHints(text, cfg.globalFilterHints, filters)
+  const domainDef =
+    findDomainDefinition(text, typeof filters.domain === 'string' ? filters.domain : undefined) ??
+    findDomainDefinition(text)
+  applyFilterHints(text, domainDef?.filterHints, filters)
 
   if (domain === 'industrial') {
     if (/\bgrinding\b/.test(lower)) filters.symptom = 'grinding noise'
@@ -435,11 +480,24 @@ export function extractHintsFromText(text: string): ProductFilters {
     if (/\b(watches?|watch)\b/.test(lower)) filters.category = 'Watches'
     else if (/\b(bags?|backpack|duffel)\b/.test(lower)) filters.category = 'Bags'
     else if (/\b(jackets?|coat)\b/.test(lower)) filters.category = 'Jackets'
-    else if (/\b(pants?|trousers?|joggers?|track\s*pants?)\b/.test(lower)) {
+    else if (/\b(pants?|trousers?|joggers?|track\s*pants?|tracksuits?|suits?)\b/.test(lower)) {
+      // Tracksuits / gym suits → apparel bottoms (not Fitness Equipment)
       filters.category = 'Pants'
     } else if (/\b(hoodie|sweatshirt)s?\b/.test(lower)) {
       filters.category = 'Hoodies & Sweatshirts'
+    } else if (/\b(shorts?)\b/.test(lower)) {
+      filters.category = 'Shorts'
+    } else if (/\b(tees?|t-?shirts?)\b/.test(lower)) {
+      filters.category = 'Tees'
     }
+  }
+
+  // Gym / workout context on apparel → training usage (activity), not equipment aisle
+  if (
+    domain === 'apparel' &&
+    /\b(gym|workout|training|athletic|sports?)\b/.test(lower)
+  ) {
+    filters.usage = filters.usage ?? 'training'
   }
 
   // Industrial option clicks
@@ -482,27 +540,10 @@ export function extractHintsFromText(text: string): ProductFilters {
     filters.category = filters.category ?? 'Bags'
   }
 
-  if (/under\s*\$?\s*50|^under\s*\$50$/.test(lower)) {
-    filters.price_max = 50
-  } else if (
-    /\$?\s*50\s*[-–to]+\s*\$?\s*100/.test(lower) ||
-    /\$50\s*[-–]\s*\$?100/.test(lower)
-  ) {
-    filters.price_min = 50
-    filters.price_max = 100
-  } else if (/above\s*\$?\s*100|over\s*\$?\s*100/.test(lower)) {
-    filters.price_min = 100
-  } else {
-    const under = lower.match(/under\s*\$?\s*(\d+)/)
-    if (under) filters.price_max = Number(under[1])
-    const between = lower.match(/\$?\s*(\d+)\s*[-–to]+\s*\$?\s*(\d+)/)
-    if (between) {
-      filters.price_min = Number(between[1])
-      filters.price_max = Number(between[2])
-    }
-    const above = lower.match(/(?:above|over)\s*\$?\s*(\d+)/)
-    if (above) filters.price_min = Number(above[1])
-  }
+  // Budget language: below/under/above/over/between/$X-$Y (any amount)
+  const priceBounds = extractPriceBounds(text)
+  if (priceBounds.price_min != null) filters.price_min = priceBounds.price_min
+  if (priceBounds.price_max != null) filters.price_max = priceBounds.price_max
 
   if (domain === 'apparel' || domain === 'gift' || domain === 'gear') {
     const colors = [
@@ -547,19 +588,44 @@ export function isReadyToSearch(
   if (clarifyingCount(userTurnCount) >= MAX_CLARIFYING_QUESTIONS) return true
 
   const domain = detectDomain(String(filters.query ?? ''), filters)
+  const clarifying = clarifyingCount(userTurnCount)
+  const domainDef = findDomainDefinition(
+    String(filters.query ?? ''),
+    domain,
+  )
+
+  if (domainDef?.enoughToSearch) {
+    const rule = domainDef.enoughToSearch
+    if (rule.immediateIfAny?.length) {
+      for (const group of rule.immediateIfAny) {
+        if (group.every((k) => filterHasValue(filters, k))) return true
+      }
+    }
+    const min = rule.minClarifying ?? 0
+    if (clarifying >= min) {
+      if (rule.requireAll?.length) {
+        if (rule.requireAll.every((k) => filterHasValue(filters, k))) return true
+      } else if (rule.requireAny?.length) {
+        if (rule.requireAny.some((k) => filterHasValue(filters, k))) return true
+      } else if (min > 0) {
+        return true
+      }
+    }
+    // Config domain present but not ready yet — skip built-in apparel heuristics
+    // unless this is a legacy id without enough clarity from config alone.
+    if (domainDef.clarify?.length) return false
+  }
 
   if (domain === 'industrial') {
     // Need at least part_type (or similar) after some clarification
     return (
-      clarifyingCount(userTurnCount) >= 2 &&
+      clarifying >= 2 &&
       Boolean(filters.part_type || filters.motor_type || filters.category)
     )
   }
 
   if (domain === 'gift') {
-    return (
-      clarifyingCount(userTurnCount) >= 2 && Boolean(filters.category)
-    )
+    return clarifying >= 2 && Boolean(filters.category)
   }
 
   if (domain === 'apparel' || domain === 'gear') {
@@ -571,7 +637,7 @@ export function isReadyToSearch(
     if (
       hasCategory &&
       (hasColor || hasGender) &&
-      clarifyingCount(userTurnCount) === 0
+      clarifying === 0
     ) {
       return true
     }
@@ -579,12 +645,12 @@ export function isReadyToSearch(
       return true
     }
     return (
-      clarifyingCount(userTurnCount) >= 2 &&
+      clarifying >= 2 &&
       Boolean(filters.category || filters.usage || filters.style)
     )
   }
 
-  return clarifyingCount(userTurnCount) >= MAX_CLARIFYING_QUESTIONS
+  return clarifying >= MAX_CLARIFYING_QUESTIONS
 }
 
 async function fallbackQuestion(
@@ -593,51 +659,31 @@ async function fallbackQuestion(
 ): Promise<AiResponse> {
   const domain = detectDomain(String(filters.query ?? ''), filters)
   const step = clarifyingCount(userTurnCount)
+  const cfg = getDomainConfig()
+  const domainDef =
+    findDomainDefinition(String(filters.query ?? ''), domain) ??
+    cfg.domains.find((d) => d.id === domain)
 
-  if (domain === 'industrial') {
-    if (step === 0 || !filters.part_type) {
+  const clarifySteps = domainDef?.clarify?.length
+    ? domainDef.clarify
+    : cfg.defaultClarify
+
+  if (clarifySteps?.length && step < MAX_CLARIFYING_QUESTIONS) {
+    for (const clarify of clarifySteps) {
+      if (!isClarifyStepNeeded(clarify, filters)) continue
       return {
         action: 'ask_question',
-        message:
-          'I can help you find the right industrial replacement component.',
-        question: 'What kind of replacement component do you need?',
-        options: [
-          'Shaft / shaft collar',
-          'Bearing',
-          'Motor assembly',
-          'Coupling / seal',
-        ],
-        filters: { ...filters, domain: 'industrial' },
+        message: clarify.message ?? 'I can help narrow that down.',
+        question: clarify.question,
+        options: clarify.options,
+        filters: { ...filters, domain },
       }
     }
-    if (!filters.motor_type && !filters.equipment_detail) {
-      return {
-        action: 'ask_question',
-        message: 'Got it.',
-        question: 'What type of motor or equipment is this for?',
-        options: [
-          'AC induction motor',
-          'Servo / stepper',
-          'Gear motor',
-          'Not sure',
-        ],
-        filters: { ...filters, domain: 'industrial' },
-      }
-    }
-    return {
-      action: 'ask_question',
-      message: 'One more detail to narrow Magento results.',
-      question: 'Which best describes what you need?',
-      options: [
-        'Exact replacement part',
-        'Compatible alternative',
-        'Full motor unit',
-        'Related accessories',
-      ],
-      filters: { ...filters, domain: 'industrial' },
-    }
+    // Domain config defined steps and none remain → search
+    if (domainDef?.clarify?.length) return forceSearch(filters)
   }
 
+  // Legacy gift path: prefer live Magento category chips when config did not ask yet
   if (domain === 'gift' && !filters.category) {
     const who =
       filters.recipient === 'husband'
@@ -792,7 +838,9 @@ export async function runAssistantTurn(input: {
 
   try {
     const result = await llm.invoke([
-      new SystemMessage(SYSTEM_PROMPT),
+      new SystemMessage(
+        buildSystemPrompt(buildMerchantSystemAppendix(getDomainConfig())),
+      ),
       new HumanMessage(
         buildUserPrompt({
           ...input,

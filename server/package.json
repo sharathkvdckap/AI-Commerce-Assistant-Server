@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "db:migrate:context": "psql \"$DATABASE_URL\" -f sql/002_user_context_memory.sql"
+    "db:migrate": "tsx src/scripts/migrate.ts",
+    "db:migrate:embeddings": "tsx src/scripts/migrate.ts 001_product_embeddings",
+    "db:migrate:context": "tsx src/scripts/migrate.ts 002_user_context_memory",
+    "sync:embeddings": "tsx src/scripts/syncEmbeddings.ts"
   },
   "dependencies": {
     "@langchain/core": "^1.1.35",

@@ -108,8 +108,15 @@ Hybrid recall when Magento keywords miss intent language:
 Postgres + pgvector must be available. Schema:
 
 ```bash
-PGPASSWORD=postgres psql -U postgres -h 127.0.0.1 -d ai_commerce_assistant -f server/sql/001_product_embeddings.sql
+cd server
+npm run db:migrate:embeddings
+# optional user memory:
+npm run db:migrate:context
+# or both:
+npm run db:migrate
 ```
+
+Migrations read `DATABASE_URL` from `server/.env` (no need to export it in the shell).
 
 `server/.env`:
 
@@ -117,6 +124,10 @@ PGPASSWORD=postgres psql -U postgres -h 127.0.0.1 -d ai_commerce_assistant -f se
 SEMANTIC_ENABLED=true
 DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/ai_commerce_assistant
 EMBEDDING_MODEL=bge-m3
+EMBEDDING_DIMS=1024
+SEMANTIC_TOP_K=12
+SEMANTIC_MIN_SCORE=0.35
+SEMANTIC_FALLBACK_MIN_SCORE=0.55
 ```
 
 Pull embedding model (once):
@@ -131,6 +142,8 @@ Index catalog:
 cd server && npm run sync:embeddings
 # or: curl -X POST http://localhost:3001/api/semantic/sync -H 'Content-Type: application/json' -d '{}'
 ```
+
+Assistant search then runs **Magento GraphQL + pgvector**, merges SKUs, and **re-ranks** by stock, budget, keyword/SKU hit, and semantic similarity. Product cards still use live Magento data (no invented SKUs).
 
 ### Semantic APIs
 

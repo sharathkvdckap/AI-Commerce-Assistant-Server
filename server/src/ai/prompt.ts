@@ -244,4 +244,10 @@ Do not generate SKUs.
 Do not generate recommendations.
 
 Your only responsibility is to understand customer intent and prepare an accurate search request.
-`;
+`
+
+/** Base system prompt plus optional merchant catalog context from domain-config.json. */
+export function buildSystemPrompt(merchantAppendix = ''): string {
+  if (!merchantAppendix.trim()) return SYSTEM_PROMPT
+  return `${SYSTEM_PROMPT}${merchantAppendix}`
+};
