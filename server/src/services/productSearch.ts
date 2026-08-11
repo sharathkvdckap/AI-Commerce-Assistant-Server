@@ -125,12 +125,48 @@ async function enrichWithSemantic(
     }
   }
 
+  // Debug: Magento + semantic product details before re-rank
+  const summarize = (p: CatalogProduct) => ({
+    id: p.id,
+    sku: p.sku,
+    name: p.name,
+    price: p.price,
+    currency: p.currency,
+    inStock: p.inStock,
+    reasons: p.reasons,
+  })
+  console.log('[productSearch] before reRank — Magento primary:', {
+    count: magento.products.length,
+    matchType: magento.matchType,
+    products: magento.products.map(summarize),
+  })
+  console.log('[productSearch] before reRank — Magento alternatives:', {
+    count: magento.alternatives.length,
+    products: magento.alternatives.map(summarize),
+  })
+  console.log('[productSearch] before reRank — Semantic:', {
+    count: semanticProducts.length,
+    minScore,
+    products: semanticProducts.map((p) => ({
+      ...summarize(p),
+      semanticScore: semanticScores.get(p.sku) ?? null,
+    })),
+  })
+
   const merged = mergeAndRerank({
     magentoProducts: magento.products,
     magentoAlternatives: magento.alternatives,
     semanticProducts,
     semanticScores,
     filters,
+  })
+
+  console.log('[productSearch] after reRank — final product ids:', {
+    source: merged.source,
+    primaryIds: merged.products.map((p) => p.id),
+    primarySkus: merged.products.map((p) => p.sku),
+    alternativeIds: merged.alternatives.map((p) => p.id),
+    alternativeSkus: merged.alternatives.map((p) => p.sku),
   })
 
   const products = filterProductsByBudget(merged.products, filters)
