@@ -55,13 +55,3 @@ Storefront PLP with semantic % and context reuse: [magento/DEMO.md — Semantic 
 | AI Commerce Assistant app (test UI) | https://i.ibb.co/4RFMNNVK/image.png |
 | Backend run | https://i.ibb.co/5g3q0B0P/image.png |
 | Products synced in vector embeddings | https://i.ibb.co/XxNDHbxZ/image.png |
-
----
-
-## Related
-
-| Doc | What it covers |
-| --- | -------------- |
-| [magento/DEMO.md](./magento/DEMO.md) | Magento config, search icon, Q&A, PLP, videos |
-| [README.md](./README.md) | Full setup |
-| [HACKATHON_DOCUMENTATION.md](./HACKATHON_DOCUMENTATION.md) | Architecture |

@@ -213,45 +213,6 @@ Vertical behavior (domains, clarify chips, attribute maps, LLM catalog hint) liv
 
 This keeps apparel vs industrial / auto prompts and Magento attribute mapping aligned with the catalog.
 
----
-
-## Magento 2 search bar redirect
-
-Module (local store example):
-
-`/var/www/html/magento248p4/app/code/Klizer/AiCommerceAssistant`
-
-What it does:
-
-1. Rewrites the storefront search form action via a plugin on `Magento\Search\Helper\Data::getResultUrl()`
-2. Optionally redirects `/catalogsearch/result/?q=...` to the assistant
-3. Admin-configurable assistant URL
-
-Enable / refresh Magento:
-
-```bash
-cd /var/www/html/magento248p4
-php bin/magento module:enable Klizer_AiCommerceAssistant
-php bin/magento setup:upgrade
-php bin/magento cache:flush
-```
-
-**Admin:** Stores → Configuration → **Klizer → AI Commerce Assistant**
-
-| Setting | Default |
-| ------- | ------- |
-| Enable AI Commerce Assistant| Yes |
-| AI API Base URL | `http://127.0.0.1:3001` |
-| Redirect to External Assistant UI (legacy) | No |
-
-With UI + API running, search from the Magento storefront should land on:
-
-`http://localhost:5173/ai-assistant`
-
-Screenshots (config, search icon, PLP flows, videos): **[magento/DEMO.md](./magento/DEMO.md)**.
-
----
-
 ## API overview
 
 ### Health & Magento
@@ -350,7 +311,7 @@ Chat sessions are **in-memory** (lost on API restart). Product truth always come
 
 ## Demo ideas
 
-Screenshots: **[DEMO.md](./DEMO.md)** (Node) · **[magento/DEMO.md](./magento/DEMO.md)** (Magento)
+Screenshots: **[DEMO.md](./DEMO.md)** (Node)
 
 | Scenario | Try |
 | -------- | --- |
@@ -375,28 +336,5 @@ Confirm `/api/health` shows Magento reachable (and semantic/context green when e
 | Context never offered | `CONTEXT_MEMORY_ENABLED`, migrations, similarity threshold, stable `userId` |
 | Wrong clarification style | Update `server/domain-config.json` for your vertical |
 
----
 
-## Further reading
-
-- [DEMO.md](./DEMO.md) — **Node / app** demo screenshots (frontend, backend, embeddings sync)
-- [magento/DEMO.md](./magento/DEMO.md) — **Magento** demo screenshots & videos (config, search, PLP, apparel / fitness / industrial)
-- [HACKATHON_DOCUMENTATION.md](./HACKATHON_DOCUMENTATION.md) — architecture, retrieval flows, business context, roadmap
-- Magento admin: **Stores → Configuration → Klizer → AI Commerce Assistant** (search redirect module)
-
-### Demo screenshots — Node setup
-
-![Frontend UI run](https://i.ibb.co/pjyCtNw1/image.png)
-
-*Frontend UI run (`npm run dev`)*
-
-![AI Commerce Assistant app UI](https://i.ibb.co/4RFMNNVK/image.png)
-
-*AI Commerce Assistant app running for test*
-
-![Backend run](https://i.ibb.co/5g3q0B0P/image.png)
-
-*Backend run (`cd server && npm run dev`)*
-
-More Node shots: **[DEMO.md](./DEMO.md)**. Magento storefront / admin shots: **[magento/DEMO.md](./magento/DEMO.md)**.
 
