@@ -8,6 +8,8 @@ import {
   buildSearchQuery,
   mapMagentoProduct,
 } from './mapper.js'
+import { extractPriceBounds, filterProductsByBudget } from './priceFilter.js'
+import { refinePrimaryAndAlternatives } from './intentFilter.js'
 import type {
   CatalogProduct,
   MagentoProductItem,
@@ -54,6 +56,99 @@ const PRODUCTS_QUERY = `
     }
   }
 `
+
+/** Catalog crawl for embedding sync — includes description text. */
+const CATALOG_SYNC_QUERY = `
+  query CatalogSync(
+    $search: String
+    $pageSize: Int!
+    $currentPage: Int!
+  ) {
+    products(
+      search: $search
+      filter: {}
+      pageSize: $pageSize
+      currentPage: $currentPage
+    ) {
+      total_count
+      items {
+        id
+        sku
+        name
+        url_key
+        stock_status
+        short_description { html }
+        description { html }
+        small_image {
+          url
+          label
+        }
+        price_range {
+          minimum_price {
+            final_price {
+              value
+              currency
+            }
+            regular_price {
+              value
+              currency
+            }
+          }
+        }
+      }
+    }
+  }
+`
+
+export interface MagentoCatalogSyncItem extends MagentoProductItem {
+  short_description?: { html?: string | null } | null
+  description?: { html?: string | null } | null
+}
+
+interface MagentoCatalogSyncResponse {
+  products: {
+    total_count: number
+    items: MagentoCatalogSyncItem[]
+  }
+}
+
+/**
+ * Page through the Magento catalog for embedding sync.
+ * Caps at the same safety limit as search (5000 products).
+ */
+export async function* iterateMagentoCatalogForSync(
+  pageSize = BATCH_PAGE_SIZE,
+): AsyncGenerator<{
+  items: MagentoCatalogSyncItem[]
+  page: number
+  totalCount: number
+}> {
+  const batchSize = Math.min(Math.max(pageSize, 1), BATCH_PAGE_SIZE)
+  let currentPage = 1
+  let totalCount = 0
+  let fetched = 0
+
+  while (currentPage <= MAX_FETCH_PAGES) {
+    const data = await magentoGraphql<MagentoCatalogSyncResponse>(
+      CATALOG_SYNC_QUERY,
+      {
+        search: null,
+        pageSize: batchSize,
+        currentPage,
+      },
+    )
+    const items = data.products?.items ?? []
+    totalCount = data.products?.total_count ?? fetched + items.length
+    fetched += items.length
+
+    yield { items, page: currentPage, totalCount }
+
+    if (items.length === 0 || fetched >= totalCount) {
+      break
+    }
+    currentPage += 1
+  }
+}
 
 /** Per-request batch size (Magento GraphQL often caps around 100). */
 const BATCH_PAGE_SIZE = 100
@@ -168,22 +263,57 @@ async function fetchBroadAlternatives(
 
   const attempts: Array<{ search: string | null; filter: Record<string, unknown> }> = []
 
-  // 1) Broad keywords + category (no price) — related items slightly outside budget still OK
+  const priceMin = filters.price_min
+  const priceMax = filters.price_max
+  const priceFilter: Record<string, unknown> = {}
+  if (priceMin != null || priceMax != null) {
+    const price: Record<string, string> = {}
+    if (typeof priceMin === 'number') price.from = String(priceMin)
+    else if (typeof priceMin === 'string' && priceMin) price.from = priceMin
+    if (typeof priceMax === 'number') price.to = String(priceMax)
+    else if (typeof priceMax === 'string' && priceMax) price.to = priceMax
+    if (Object.keys(price).length > 0) priceFilter.price = price
+  }
+
+  // Prefer budget-respecting alternatives first
   if (hasCategoryFilter || broadSearch) {
     attempts.push({
       search: broadSearch,
-      filter: hasCategoryFilter ? categoryOnlyFilter : {},
+      filter: {
+        ...(hasCategoryFilter ? categoryOnlyFilter : {}),
+        ...priceFilter,
+      },
     })
   }
 
-  // 2) Category browse only (different SKUs in same aisle)
   if (hasCategoryFilter) {
-    attempts.push({ search: null, filter: categoryOnlyFilter })
+    attempts.push({
+      search: null,
+      filter: { ...categoryOnlyFilter, ...priceFilter },
+    })
   }
 
-  // 3) Broad keywords, no category filter
   if (broadSearch) {
-    attempts.push({ search: broadSearch, filter: {} })
+    attempts.push({
+      search: broadSearch,
+      filter: { ...priceFilter },
+    })
+  }
+
+  // Only if no price constraint: allow broader (out-of-budget) related items
+  if (Object.keys(priceFilter).length === 0) {
+    if (hasCategoryFilter || broadSearch) {
+      attempts.push({
+        search: broadSearch,
+        filter: hasCategoryFilter ? categoryOnlyFilter : {},
+      })
+    }
+    if (hasCategoryFilter) {
+      attempts.push({ search: null, filter: categoryOnlyFilter })
+    }
+    if (broadSearch) {
+      attempts.push({ search: broadSearch, filter: {} })
+    }
   }
 
   const seen = new Set(excludeIds)
@@ -346,6 +476,15 @@ export async function searchMagentoProducts(
   attributeRelaxed?: boolean
 }> {
   const rawQuery = String(filters.query ?? filters.category ?? '')
+  // Re-apply budget from original query if filters lost price during clarification
+  const fromQuery = extractPriceBounds(rawQuery)
+  if (filters.price_max == null && fromQuery.price_max != null) {
+    filters = { ...filters, price_max: fromQuery.price_max }
+  }
+  if (filters.price_min == null && fromQuery.price_min != null) {
+    filters = { ...filters, price_min: fromQuery.price_min }
+  }
+
   const categoryMatch = await matchCategoriesFromSearch(filters, rawQuery)
   const categoryIds = categoryMatch.categoryIds
   const matchedPaths = categoryMatch.matched.map((m) => m.path)
@@ -357,7 +496,10 @@ export async function searchMagentoProducts(
   }))
 
   const { filter: attributeFilters, matched: attributeHits } =
-    await resolveMagentoAttributeFilters(filters)
+    await resolveMagentoAttributeFilters(filters, {
+      // Explicit "for men/women" → apply Magento gender attribute too
+      skipGenderAttribute: !filters.gender,
+    })
   const attributeCodes = Object.keys(attributeFilters)
   const hasAttributeFilters = attributeCodes.length > 0
   const matchedAttributes = attributeHits.map((hit) => ({
@@ -466,28 +608,63 @@ export async function searchMagentoProducts(
   }
 
   if (items.length > 0) {
-    const products = items.map((item) =>
+    let products = items.map((item) =>
       mapMagentoProduct(item, filtersWithAttrHints, matchedPaths),
     )
-    const excludeIds = new Set(items.map((item) => productKey(item)).filter(Boolean))
+    products = filterProductsByBudget(products, filters)
+
+    const excludeIds = new Set(products.map((p) => p.id).filter(Boolean))
+    for (const item of items) {
+      const mapped = mapMagentoProduct(item, filtersWithAttrHints, matchedPaths)
+      if (!filterProductsByBudget([mapped], filters).length) {
+        excludeIds.add(productKey(item))
+      }
+    }
+
     const altItems = await fetchBroadAlternatives(
       filters,
       categoryIds,
       hasCategoryFilter,
       excludeIds,
     )
-    const alternatives = altItems.map((item) =>
-      mapMagentoProduct(item, filtersWithAttrHints, matchedPaths),
+    let alternatives = filterProductsByBudget(
+      altItems.map((item) =>
+        mapMagentoProduct(item, filtersWithAttrHints, matchedPaths),
+      ),
+      filters,
     )
 
-    return {
-      totalCount,
-      matchType: alternatives.length > 0 || attributeRelaxed ? 'mixed' : 'exact',
-      matchedCategories,
-      matchedAttributes,
+    const refined = refinePrimaryAndAlternatives(
       products,
       alternatives,
-      attributeRelaxed,
+      filters,
+    )
+    products = refined.products
+    // Intent filter already drops cross-gender / off-category noise.
+    alternatives = refined.alternatives
+
+    if (products.length === 0 && alternatives.length === 0) {
+      // fall through
+    } else if (products.length === 0) {
+      return {
+        totalCount: alternatives.length,
+        matchType: 'recommended',
+        matchedCategories,
+        matchedAttributes,
+        products: [],
+        alternatives,
+        attributeRelaxed,
+      }
+    } else {
+      return {
+        totalCount: products.length,
+        matchType: alternatives.length > 0 ? 'mixed' : 'exact',
+        matchedCategories,
+        matchedAttributes,
+        products,
+        alternatives,
+        attributeRelaxed: false,
+      }
     }
   }
 
@@ -499,16 +676,26 @@ export async function searchMagentoProducts(
     new Set(),
   )
 
-  if (altItems.length > 0) {
+  const alternatives = refinePrimaryAndAlternatives(
+    [],
+    filterProductsByBudget(
+      altItems.map((item) =>
+        mapMagentoProduct(item, filtersWithAttrHints, matchedPaths),
+      ),
+      filters,
+    ),
+    filters,
+  ).alternatives
+
+  if (alternatives.length > 0) {
     return {
-      totalCount: altItems.length,
+      totalCount: alternatives.length,
       matchType: 'recommended',
       matchedCategories,
       matchedAttributes,
       products: [],
-      alternatives: altItems.map((item) =>
-        mapMagentoProduct(item, filtersWithAttrHints, matchedPaths),
-      ),
+      alternatives,
+      attributeRelaxed,
     }
   }
 

@@ -14,6 +14,27 @@ import type {
 } from '@/types/assistant'
 import type { PendingContextReuse } from '@/types/context'
 
+/** Don't block the first search if context memory / Postgres is slow. */
+const CONTEXT_LOOKUP_TIMEOUT_MS = 2500
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms)
+    promise
+      .then((value) => {
+        clearTimeout(timer)
+        resolve(value)
+      })
+      .catch(() => {
+        clearTimeout(timer)
+        resolve(null)
+      })
+  })
+}
+
 function createMessage(
   role: ChatMessage['role'],
   content: string,
@@ -195,6 +216,8 @@ export function useAssistant() {
     async (query: string) => {
       const trimmed = query.trim()
       if (!trimmed) return
+      if (submittingRef.current) return
+      submittingRef.current = true
 
       sessionIdRef.current = null
       setHasStarted(true)
@@ -213,10 +236,11 @@ export function useAssistant() {
 
       try {
         // Check for similar prior context before clarifying questions.
-        const context = await searchSimilarContext(
-          userIdRef.current,
-          trimmed,
-        ).catch(() => null)
+        // Timed out so a slow/hung Postgres never blocks Send.
+        const context = await withTimeout(
+          searchSimilarContext(userIdRef.current, trimmed),
+          CONTEXT_LOOKUP_TIMEOUT_MS,
+        )
 
         if (context?.shouldReuse && context.match) {
           const message =
@@ -230,7 +254,6 @@ export function useAssistant() {
             preferences: context.preferences,
             similarity: context.similarity ?? context.match.similarity,
           })
-          setIsThinking(false)
           return
         }
 
@@ -241,6 +264,8 @@ export function useAssistant() {
             ? err.message
             : 'Could not reach the assistant API. Is the backend running?',
         )
+      } finally {
+        submittingRef.current = false
         setIsThinking(false)
       }
     },
@@ -273,8 +298,12 @@ export function useAssistant() {
     await runAssistantStart(query)
   }, [isThinking, pendingContext, runAssistantStart])
 
+  const beginWithQueryRef = useRef(beginWithQuery)
+  beginWithQueryRef.current = beginWithQuery
+
   useEffect(() => {
     sessionIdRef.current = null
+    submittingRef.current = false
     userIdRef.current = getOrCreateUserId()
     setMessages([])
     setActiveQuestion(null)
@@ -292,14 +321,16 @@ export function useAssistant() {
 
     const fromUrl = readQueryParam()
     if (fromUrl) {
-      void beginWithQuery(fromUrl)
+      void beginWithQueryRef.current(fromUrl)
     }
-  }, [sessionKey, beginWithQuery])
+    // Only re-bootstrap on Start over (sessionKey). Do not depend on beginWithQuery
+    // or a changing callback will wipe an in-flight search.
+  }, [sessionKey])
 
   const submitAnswer = useCallback(
     async (answer: string) => {
       const trimmed = answer.trim()
-      if (!trimmed || isThinking || submittingRef.current) return
+      if (!trimmed || submittingRef.current) return
 
       if (pendingContext) return
 
@@ -330,7 +361,7 @@ export function useAssistant() {
         setIsThinking(false)
       }
     },
-    [applyResponse, beginWithQuery, isThinking, pendingContext],
+    [applyResponse, beginWithQuery, pendingContext],
   )
 
   const answerQuestion = useCallback(

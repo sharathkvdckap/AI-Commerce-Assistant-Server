@@ -20,6 +20,10 @@ function envFloat(value: string | undefined, fallback: number): number {
   return Number.isFinite(n) ? n : fallback
 }
 
+const databaseUrl =
+  process.env.DATABASE_URL ??
+  'postgresql://postgres:postgres@127.0.0.1:5432/ai_commerce_assistant'
+
 export const config = {
   port: envInt(process.env.PORT, 3001),
   ollama: {
@@ -35,12 +39,18 @@ export const config = {
     pageSize: envInt(process.env.MAGENTO_PAGE_SIZE, 0),
     timeoutMs: envInt(process.env.MAGENTO_TIMEOUT_MS, 20000),
   },
-  /** User context memory (pgvector + BGE-M3). Separate from product semantic search. */
+  /** Product hybrid semantic search (pgvector + BGE-M3). */
+  semantic: {
+    enabled: envBool(process.env.SEMANTIC_ENABLED, false),
+    topK: envInt(process.env.SEMANTIC_TOP_K, 12),
+    minScore: envFloat(process.env.SEMANTIC_MIN_SCORE, 0.35),
+    fallbackMinScore: envFloat(process.env.SEMANTIC_FALLBACK_MIN_SCORE, 0.55),
+    syncConcurrency: envInt(process.env.SEMANTIC_SYNC_CONCURRENCY, 4),
+  },
+  /** User context memory (pgvector + BGE-M3). Shares DATABASE_URL with semantic. */
   context: {
     enabled: envBool(process.env.CONTEXT_MEMORY_ENABLED, true),
-    databaseUrl:
-      process.env.DATABASE_URL ??
-      'postgresql://postgres:postgres@127.0.0.1:5432/ai_commerce_assistant',
+    databaseUrl,
     embeddingModel: process.env.EMBEDDING_MODEL ?? 'bge-m3',
     embeddingDims: envInt(process.env.EMBEDDING_DIMS, 1024),
     similarityThreshold: envFloat(
@@ -48,6 +58,11 @@ export const config = {
       0.8,
     ),
   },
+  /**
+   * Merchant vertical config (domains, clarify steps, attribute maps).
+   * Default: server/domain-config.json — override with DOMAIN_CONFIG_PATH.
+   */
+  domainConfigPath: process.env.DOMAIN_CONFIG_PATH?.trim() || '',
 }
 
 export function isMagentoConfigured(): boolean {
@@ -60,6 +75,14 @@ export function getMagentoGraphqlUrl(): string {
   return ''
 }
 
+export function isDatabaseConfigured(): boolean {
+  return Boolean(config.context.databaseUrl)
+}
+
 export function isContextMemoryConfigured(): boolean {
-  return config.context.enabled && Boolean(config.context.databaseUrl)
+  return config.context.enabled && isDatabaseConfigured()
+}
+
+export function isSemanticConfigured(): boolean {
+  return config.semantic.enabled && isDatabaseConfigured()
 }
