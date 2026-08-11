@@ -6,9 +6,9 @@
 
 AI Commerce Assistant turns natural-language shopping into Magento-ready search. Customers describe what they need (“comfortable for the gym,” “motor shaft is grinding”); the assistant clarifies intent, builds filters, and returns **real Magento catalog products**—never invented SKUs, prices, or stock.
 
-**Stack:** Ollama (Qwen chat + BGE-M3 embeddings) → Express AI engine → Magento 2 GraphQL. Optional **hybrid semantic search** (pgvector) and **user context memory** improve recall and returning-shopper reuse. A Magento module can redirect storefront search into the assistant UI.
+**Stack:** Ollama (Qwen chat + BGE-M3 embeddings) → Express AI engine → Magento 2 GraphQL. Optional **hybrid semantic search** (pgvector) and **user context memory** improve recall and returning-shopper reuse. **Search analytics** track zero-result rate, hybrid/semantic lift, and product CTR for marketing ROI—visible in the React dashboard and Magento Admin. A Magento module can redirect storefront search into the assistant UI.
 
-**Who benefits:** shoppers (plain language), sales/support (fewer “find me X” tickets), merchants (better discovery without replacing Magento).
+**Who benefits:** shoppers (plain language), sales/support (fewer “find me X” tickets), merchants (better discovery + measurable ROI without replacing Magento).
 
 ---
 
@@ -37,6 +37,7 @@ AI Commerce Assistant turns natural-language shopping into Magento-ready search.
 | Retrieval | Magento GraphQL ± hybrid pgvector enrich |
 | Fast path | Exact SKU / product name skips Q&A |
 | Context (optional) | Postgres memory + previous-search replay |
+| Analytics | Zero-result, hybrid lift, CTR; what / how / whom |
 | Storefront bridge | Magento module redirect → assistant |
 
 **Shared front of the funnel** (same for both modes):
@@ -67,8 +68,9 @@ Closes the gap between **how customers speak** and **how Magento indexes product
 | Customers | Plain language → guided options → real in-stock results |
 | Sales / support | Fewer find-a-product interruptions |
 | Merchants | Better catalog utilization on existing Magento data |
+| Marketing / ops | Dashboard: empty searches, hybrid lift, PDP CTR |
 
-**Measurable funnel:** query → clarifications → Magento/hybrid results → PDP click.
+**Measurable funnel:** query → clarifications → Magento/hybrid results → PDP click (logged as impressions + clicks).
 
 Why AI: rule trees are brittle per category; an LLM interprets messy language and emits filters while Magento stays authoritative. Embeddings recover paraphrases keywords miss.
 
@@ -85,6 +87,7 @@ Why AI: rule trees are brittle per category; an LLM interprets messy language an
 | **Hybrid search** | Magento first → BGE-M3 embed → `product_embeddings` recall → merge/re-rank (`semantic/rerank.ts`) → source `magento` \| `semantic` \| `hybrid` |
 | **Sessions** | In-memory UUID chat (lost on restart) |
 | **Context memory** | Optional: save/search/replay prior queries for `userId` against live Magento stock/price |
+| **Analytics** | Every completed search → Postgres; card impressions/clicks → CTR; React `/analytics` + Magento Admin ROI dashboard |
 | **Guardrails** | Magento-only catalog truth; no fabricated products; no exposing prompts/embeddings to shoppers |
 
 ---
@@ -105,18 +108,23 @@ flowchart LR
   API --> CTX[Context memory]
   CTX --> PG
   CTX --> EMB
+  API --> AN[Analytics]
+  AN --> PG
+  UI --> AN
+  MOD2[Magento Admin analytics] --> AN
 ```
 
 | Layer | Tech |
 | ----- | ---- |
-| Frontend | React 19, Vite 8, Tailwind 4, React Router |
+| Frontend | React 19, Vite 8, Tailwind 4, React Router (+ `/analytics` dashboard) |
 | Backend | Node 20+, Express 5, Zod, LangChain Ollama |
 | Catalog | Magento 2 GraphQL (products, categories, attributes) |
 | Vectors | PostgreSQL + pgvector; embeddings `bge-m3` (1024-d) |
 | Chat LLM | `qwen2.5:3b` via Ollama |
 | Session | In-memory Map; optional Postgres context |
+| Analytics | Postgres search + product events; Magento Admin `Klizer_AiCommerceAnalytics` |
 
-**Data path:** LLM/heuristics → category + attribute resolution → Magento query → optional semantic merge → UI cards. Embedding sync: `npm run sync:embeddings` (Magento crawl → vectors). Merchant vertical behavior can also be driven by `server/domain-config.json` (see `DOMAIN_CONFIG_PATH`).
+**Data path:** LLM/heuristics → category + attribute resolution → Magento query → optional semantic merge → UI cards → analytics (search log + impressions/clicks). Embedding sync: `npm run sync:embeddings` (Magento crawl → vectors). Merchant vertical behavior can also be driven by `server/domain-config.json` (see `DOMAIN_CONFIG_PATH`).
 
 ### Retrieval flows: `SEMANTIC_ENABLED`
 
@@ -205,6 +213,60 @@ flowchart TD
 
 ---
 
+# Analytics (ROI) — implemented
+
+Marketing needs proof that AI search helps: empty searches, how often semantic/hybrid improves over Magento keywords alone, and whether shown products get clicked.
+
+### What / how / whom
+
+| Question | Data |
+| -------- | ---- |
+| **What** did they search? | `original_query` on each completed search |
+| **How** was it resolved? | `source` (`magento` \| `semantic` \| `hybrid`), `match_type`, filters JSON |
+| **Whom** searched? | `user_id` (stable guest UUID in browser today; Magento customer id is roadmap) |
+
+### Metrics
+
+| Metric | Definition |
+| ------ | ---------- |
+| **Zero-result rate** | Searches with no primary and no alternative products |
+| **Hybrid / semantic share** | Share of searches whose `source` is `hybrid` or `semantic` (lift vs Magento-only path) |
+| **CTR** | Product card **clicks** ÷ **impressions** |
+
+### Pipeline
+
+```text
+Assistant search completes
+  → INSERT ai_search_analytics (query, user, source, match_type, counts)
+UI shows product cards
+  → POST /api/analytics/track  impression(s)
+Shopper clicks View Product
+  → POST /api/analytics/track  click
+Dashboard / Magento Admin
+  → GET /api/analytics/summary  +  /searches
+```
+
+Requires `DATABASE_URL` and migration `003_search_analytics.sql` (`npm run db:migrate:analytics` or full `db:migrate`). Independent of `CONTEXT_MEMORY_ENABLED`, but shares the same Postgres.
+
+### Surfaces
+
+| Surface | URL / path |
+| ------- | ---------- |
+| React dashboard | `http://localhost:5173/analytics` (header → **Analytics**) |
+| APIs | `GET /api/analytics/summary`, `/searches`, `POST /track`, `/status` |
+| Magento Admin | Module `Klizer_AiCommerceAnalytics` → **AI Commerce Analytics → Search ROI Dashboard** |
+
+Install Magento module from `magento/Klizer/AiCommerceAnalytics` (copy to `app/code/Klizer/AiCommerceAnalytics`, enable, configure API base URL `http://127.0.0.1:3001`).
+
+### Demo talking points
+
+1. Run 2–3 assistant searches; open a product (CTR).  
+2. Open `/analytics` — show zero-result %, hybrid share, CTR, top queries, recent rows (what / how / whom).  
+3. Optionally open Magento Admin ROI dashboard (same API).  
+4. Contrast Semantic OFF (`source: magento`) vs ON (`hybrid` / `semantic` rows appear).
+
+---
+
 # Integrations & APIs
 
 | Integration | Detail |
@@ -213,11 +275,15 @@ flowchart TD
 | Assistant API | `POST /api/assistant/start`, `/message`, `/search` |
 | Semantic API | `GET /api/semantic/status`, `POST /sync`, `POST /search` |
 | Context API | `GET /api/context/status`, `POST /save`, `GET /latest` |
-| Health | `GET /api/health` (model, Magento, semantic, context) |
+| Analytics API | `GET /api/analytics/summary`, `/searches`, `POST /track` |
+| Health | `GET /api/health` (model, Magento, semantic, context, analytics) |
 | Storefront | `Klizer_AiCommerceAssistant` redirects search to assistant URL |
+| Magento Admin | `Klizer_AiCommerceAnalytics` — Search ROI dashboard |
 
 Landing URL (dev): `http://localhost:5173/ai-assistant?q=Your+Query`  
-Admin: **Stores → Configuration → Klizer → AI Commerce Assistant**.
+Analytics UI: `http://localhost:5173/analytics`  
+Admin (search redirect): **Stores → Configuration → Klizer → AI Commerce Assistant**.  
+Admin (ROI): **AI Commerce Analytics → Search ROI Dashboard**.
 
 ---
 
@@ -229,13 +295,13 @@ Admin: **Stores → Configuration → Klizer → AI Commerce Assistant**.
 | API | Express `:3001` |
 | Ollama | `qwen2.5:3b` + `bge-m3` |
 | Magento | GraphQL endpoint |
-| Postgres | `DATABASE_URL` + pgvector (semantic/context) |
+| Postgres | `DATABASE_URL` + pgvector (semantic / context / **analytics**) |
 
 | Env flag | Role |
 | -------- | ---- |
 | `SEMANTIC_ENABLED` | Hybrid Magento + pgvector |
 | `CONTEXT_MEMORY_ENABLED` | Save/reuse search context |
-| `DATABASE_URL` | Shared Postgres |
+| `DATABASE_URL` | Shared Postgres (also powers analytics) |
 | `EMBEDDING_MODEL` / `DIMS` | Default `bge-m3` / `1024` |
 | `SEMANTIC_TOP_K` / scores | Recall depth & thresholds |
 
@@ -245,7 +311,7 @@ cd server && npm i && npm run db:migrate && npm run sync:embeddings && npm run d
 npm i && npm run dev
 ```
 
-UI: `http://localhost:5173/ai-assistant` · Health: `http://localhost:3001/api/health`
+UI: `http://localhost:5173/ai-assistant` · Analytics: `http://localhost:5173/analytics` · Health: `http://localhost:3001/api/health`
 
 **Production notes:** PM2/containers, Nginx/TLS, managed Postgres, Redis for multi-instance sessions, rate limits, protect Magento tokens.
 
@@ -261,6 +327,7 @@ UI: `http://localhost:5173/ai-assistant` · Health: `http://localhost:3001/api/h
 | **D – Context replay** | Save search for `userId` → similar query → continue previous filters on live catalog |
 | **E – Semantic enrich** | Sync embeddings → vague query → `hybrid` / `semantic` results when keywords are weak |
 | **F – Shorts (semantic + context)** | “Show some good varieties of shorts” → see **Architecture → SEMANTIC_ENABLED=true** flowchart: context check → AI filters → Magento + pgvector → hybrid cards → save context |
+| **G – Analytics ROI** | After a few searches + PDP clicks → `/analytics` (or Magento Admin) → zero-result %, hybrid share, CTR, what/how/whom table |
 
 *(Entry: open the assistant UI, or Magento search redirect into the same UI.)*
 
@@ -272,16 +339,27 @@ UI: `http://localhost:5173/ai-assistant` · Health: `http://localhost:3001/api/h
 4. Show response `source` (`magento` / `semantic` / `hybrid`) and card reasons (e.g. “Semantic match ~78%”).  
 5. Repeat a similar query with the same `userId` to demo context reuse / continue previous search.
 
+**Demo G talking points**
+
+1. Confirm `/api/health` → `analytics.enabled: true` (and `db:migrate:analytics` applied).  
+2. Complete a search; click **View Product** on a card.  
+3. Open **Analytics** — call out zero-result rate, hybrid/semantic share, CTR.  
+4. Scroll **Recent searches**: query (what), source/match (how), user id (whom).  
+5. Optional: Magento **AI Commerce Analytics → Search ROI Dashboard**.
+
 ---
 
 # Source Layout (simplified)
 
 ```text
 AI-Commerce-Assistant/
-├── src/                     # React assistant UI
+├── src/                     # React assistant UI + /analytics page
+├── magento/
+│   └── Klizer/AiCommerceAnalytics/   # Magento Admin ROI dashboard
 └── server/src/
     ├── ai/                  # engine.ts, prompt.ts
-    ├── routes/              # assistant, context, semantic
+    ├── analytics/           # search logs, impressions, CTR summary
+    ├── routes/              # assistant, context, semantic, analytics
     ├── services/            # productSearch, contextReplay
     ├── semantic/            # sync, repository, rerank
     ├── context/             # embeddings, memory, preferences
@@ -290,7 +368,7 @@ AI-Commerce-Assistant/
     └── session/             # in-memory store
 ```
 
-External: Magento module `Klizer_AiCommerceAssistant`.
+External: Magento modules `Klizer_AiCommerceAssistant` (search redirect), `Klizer_AiCommerceAnalytics` (Admin ROI).
 
 ---
 
@@ -304,8 +382,9 @@ External: Magento module `Klizer_AiCommerceAssistant`.
 | Generative shopping | Hallucinated SKUs/prices | Magento as sole catalog authority |
 | Stateless assistants | Re-ask every visit | Optional context replay |
 | Disconnected AI widget | Separate from store search | Magento search redirects into assistant |
+| No search ROI visibility | Can’t prove lift or CTR | Analytics: zero-result, hybrid share, clicks |
 
-**Closed loop:** understand → clarify → filter → real catalog (lexical ± semantic) → PDP.
+**Closed loop:** understand → clarify → filter → real catalog (lexical ± semantic) → PDP → **measurable** impressions/clicks.
 
 ---
 
@@ -314,8 +393,8 @@ External: Magento module `Klizer_AiCommerceAssistant`.
 - Facet-aware clarification options from Magento aggregations  
 - RAG over manuals/specs (industrial)  
 - Persistent chat sessions (Redis) + add-to-cart / quote in chat  
-- Authenticated Magento shopper context; B2B company accounts  
-- Analytics (zero-result, hybrid lift, PDP CTR) + A/B vs keyword search  
+- Authenticated Magento shopper context (named “whom” in analytics); B2B company accounts  
+- A/B vs classic Magento keyword search (controlled experiment on top of current analytics)  
 - Voice / image for warehouse & parts ID; agentic cart/reorder under guardrails  
 - Production hardening (containers, multi-store, CRM/ERP handoff)
 
@@ -323,4 +402,4 @@ External: Magento module `Klizer_AiCommerceAssistant`.
 
 # Conclusion
 
-A Magento-native path from **ambiguous intent** to **authoritative catalog results**: open-source LLM, strict schemas, domain heuristics, GraphQL, optional BGE-M3/pgvector hybrid search, and context memory—with a storefront search bridge. Demo value is inspectable: run the UI, ask a real Magento-backed question, and see conversation become commerce without inventing the catalog.
+A Magento-native path from **ambiguous intent** to **authoritative catalog results**: open-source LLM, strict schemas, domain heuristics, GraphQL, optional BGE-M3/pgvector hybrid search, context memory, and **search analytics** (zero-result, hybrid lift, CTR)—with storefront and Admin bridges. Demo value is inspectable: run the UI, ask a real Magento-backed question, click through to a PDP, and show marketing the ROI dashboard.
