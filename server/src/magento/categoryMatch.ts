@@ -44,6 +44,62 @@ const BROAD_APPAREL = new Set([
   'outfit',
   'outfits',
   'wear',
+  'activewear',
+  'athleisure',
+])
+
+/** Clothing product nouns — when present, prefer apparel aisles over fitness equipment. */
+const APPAREL_PRODUCT_WORDS = new Set([
+  'suit',
+  'suits',
+  'tracksuit',
+  'tracksuits',
+  'pant',
+  'pants',
+  'trouser',
+  'trousers',
+  'jogger',
+  'joggers',
+  'short',
+  'shorts',
+  'legging',
+  'leggings',
+  'hoodie',
+  'hoodies',
+  'sweatshirt',
+  'sweatshirts',
+  'jacket',
+  'jackets',
+  'tee',
+  'tees',
+  'shirt',
+  'shirts',
+  'tank',
+  'tanks',
+  'top',
+  'tops',
+  'bottom',
+  'bottoms',
+  'dress',
+  'dresses',
+  'skirt',
+  'skirts',
+  'shoe',
+  'shoes',
+  'sneaker',
+  'sneakers',
+])
+
+const EQUIPMENT_WORDS = new Set([
+  'equipment',
+  'dumbbell',
+  'dumbbells',
+  'kettlebell',
+  'treadmill',
+  'bike',
+  'cycle',
+  'elliptical',
+  'machine',
 ])
 
 const GIFT_WORDS = new Set([
@@ -133,6 +189,23 @@ function normalizeToken(token: string): string[] {
   if (token === 'watches') variants.add('watch')
   if (token === 'jacket') variants.add('jackets')
   if (token === 'jackets') variants.add('jacket')
+
+  // Gym suits / tracksuits → Magento apparel leaves (Pants, Hoodies), not equipment
+  if (['suit', 'suits', 'tracksuit', 'tracksuits'].includes(token)) {
+    variants.add('pants')
+    variants.add('pant')
+    variants.add('hoodie')
+    variants.add('hoodies')
+    variants.add('sweatshirt')
+    variants.add('clothing')
+    variants.add('apparel')
+  }
+
+  // Gym / workout as activity context for apparel, not "Fitness Equipment" alone
+  if (['gym', 'workout', 'training', 'athletic'].includes(token)) {
+    variants.add('training')
+  }
+
   return [...variants]
 }
 
@@ -197,11 +270,22 @@ function scoreCategory(cat: FlatCategory, tokens: string[]): number {
     ['men', 'mens', 'women', 'womens', 'woman'].includes(t),
   )
   const industrialTokens = tokens.filter((t) => INDUSTRIAL_WORDS.has(t))
+  const apparelTokens = tokens.filter((t) => APPAREL_PRODUCT_WORDS.has(t) || BROAD_APPAREL.has(t))
+  const equipmentTokens = tokens.filter((t) => EQUIPMENT_WORDS.has(t))
   const otherTokens = tokens.filter(
     (t) =>
       !['men', 'mens', 'women', 'womens', 'woman'].includes(t) &&
       !GIFT_WORDS.has(t),
   )
+
+  const isFitnessEquipment =
+    cat.nameLower.includes('fitness equipment') ||
+    (pathText.includes('gear') && cat.nameLower.includes('equipment'))
+
+  // Clothing intent must not land in Fitness Equipment / gear machines
+  if (apparelTokens.length > 0 && equipmentTokens.length === 0 && isFitnessEquipment) {
+    return 0
+  }
 
   // Industrial queries prefer Industrial Products / related categories
   if (industrialTokens.length > 0) {
@@ -231,10 +315,17 @@ function scoreCategory(cat: FlatCategory, tokens: string[]): number {
       cat.nameLower === 'bags' ||
       cat.nameLower === 'watches' ||
       cat.nameLower === 'fitness equipment'
-    if (underWomen) return 0
-    if (!underMen && !gearNeutral) return 0
-    if (underMen) score += 8
-    if (gearNeutral) score += 5
+    // Apparel clothing + gender → stay in Men/Women apparel, not Gear equipment
+    if (apparelTokens.length > 0 && equipmentTokens.length === 0) {
+      if (underWomen) return 0
+      if (!underMen) return 0
+      if (underMen) score += 8
+    } else {
+      if (underWomen) return 0
+      if (!underMen && !gearNeutral) return 0
+      if (underMen) score += 8
+      if (gearNeutral) score += 5
+    }
   }
 
   if (
@@ -248,10 +339,16 @@ function scoreCategory(cat: FlatCategory, tokens: string[]): number {
       pathText.includes('gear') ||
       cat.nameLower === 'bags' ||
       cat.nameLower === 'watches'
-    if (underMen) return 0
-    if (!underWomen && !gearNeutral) return 0
-    if (underWomen) score += 8
-    if (gearNeutral) score += 5
+    if (apparelTokens.length > 0 && equipmentTokens.length === 0) {
+      if (underMen) return 0
+      if (!underWomen) return 0
+      if (underWomen) score += 8
+    } else {
+      if (underMen) return 0
+      if (!underWomen && !gearNeutral) return 0
+      if (underWomen) score += 8
+      if (gearNeutral) score += 5
+    }
   }
 
   for (const token of otherTokens) {
@@ -272,9 +369,38 @@ function scoreCategory(cat: FlatCategory, tokens: string[]): number {
       continue
     }
 
+    // Gym/training as soft boost for apparel leaves, not for Fitness Equipment
+    if (['gym', 'workout', 'training', 'athletic'].includes(token)) {
+      if (isFitnessEquipment && apparelTokens.length > 0) continue
+      if (
+        pathText.includes('men') ||
+        pathText.includes('women') ||
+        ['pants', 'shorts', 'hoodies & sweatshirts', 'tees', 'jackets'].includes(
+          cat.nameLower,
+        )
+      ) {
+        score += 3
+      }
+      continue
+    }
+
     if (cat.nameLower === token) score += 12
     else if (cat.nameLower.includes(token)) score += 7
     else if (pathText.includes(token)) score += 5
+  }
+
+  // Apparel product nouns strongly prefer matching Magento apparel leaves
+  if (apparelTokens.length > 0 && !isFitnessEquipment) {
+    if (
+      ['pants', 'shorts', 'hoodies & sweatshirts', 'tees', 'jackets', 'tanks'].some(
+        (n) => cat.nameLower === n || cat.nameLower.includes(n),
+      )
+    ) {
+      score += 6
+    }
+    if (pathText.includes('men') || pathText.includes('women')) {
+      score += 2
+    }
   }
 
   // Only boost categories that already matched tokens

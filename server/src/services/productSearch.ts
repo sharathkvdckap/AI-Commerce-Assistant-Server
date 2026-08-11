@@ -9,6 +9,8 @@ import {
   findDirectSkuOrNameMatch as findMagentoDirectMatch,
   searchMagentoProducts,
 } from '../magento/search.js'
+import { filterProductsByBudget } from '../magento/priceFilter.js'
+import { refinePrimaryAndAlternatives } from '../magento/intentFilter.js'
 import type { CatalogProduct, ProductSource } from '../magento/types.js'
 import {
   hydrateSemanticHits,
@@ -131,27 +133,32 @@ async function enrichWithSemantic(
     filters,
   })
 
+  const products = filterProductsByBudget(merged.products, filters)
+  const alternatives = filterProductsByBudget(merged.alternatives, filters)
+  const refined = refinePrimaryAndAlternatives(products, alternatives, filters)
+  const primary = refined.products
+  const alts = refined.alternatives
+
   let matchType = magento.matchType
-  if (merged.products.length > 0) {
+  if (primary.length > 0) {
     if (magento.matchType === 'none' || magento.matchType === 'recommended') {
       matchType = merged.source === 'semantic' ? 'recommended' : 'mixed'
-    } else if (merged.source === 'hybrid') {
+    } else if (merged.source === 'hybrid' && alts.length > 0) {
       matchType = 'mixed'
+    } else {
+      matchType = alts.length > 0 ? 'mixed' : 'exact'
     }
-  } else if (merged.alternatives.length > 0) {
+  } else if (alts.length > 0) {
     matchType = 'recommended'
   } else {
     matchType = 'none'
   }
 
   return {
-    products: merged.products,
-    alternatives: merged.alternatives,
+    products: primary,
+    alternatives: alts,
     source: merged.source,
-    totalCount: Math.max(
-      magento.totalCount,
-      merged.products.length + merged.alternatives.length,
-    ),
+    totalCount: Math.max(magento.totalCount, primary.length + alts.length),
     matchType,
   }
 }
@@ -175,21 +182,40 @@ export async function searchProducts(
     const enriched = await enrichWithSemantic(filters, magento)
 
     const color = typeof filters.color === 'string' ? filters.color : ''
+    const budgeted = {
+      products: filterProductsByBudget(enriched.products, filters),
+      alternatives: filterProductsByBudget(enriched.alternatives, filters),
+    }
+    const refined = refinePrimaryAndAlternatives(
+      budgeted.products,
+      budgeted.alternatives,
+      filters,
+    )
+    const products = refined.products
+    const alternatives = refined.alternatives
+    let matchType = enriched.matchType
+    if (products.length === 0 && alternatives.length > 0) {
+      matchType = 'recommended'
+    } else if (products.length === 0 && alternatives.length === 0) {
+      matchType = 'none'
+    } else if (products.length > 0 && alternatives.length === 0) {
+      matchType = 'exact'
+    }
 
     return {
-      products: enriched.products,
-      alternatives: enriched.alternatives,
+      products,
+      alternatives,
       source: enriched.source,
-      totalCount: enriched.totalCount,
-      matchType: enriched.matchType,
+      totalCount: products.length + alternatives.length,
+      matchType,
       matchedCategories: magento.matchedCategories,
       matchedAttributes: magento.matchedAttributes,
       warning: buildWarning(
         enriched.source,
-        enriched.matchType,
-        enriched.products.length,
-        enriched.alternatives.length,
-        magento.attributeRelaxed,
+        matchType,
+        products.length,
+        alternatives.length,
+        false,
         color,
       ),
     }

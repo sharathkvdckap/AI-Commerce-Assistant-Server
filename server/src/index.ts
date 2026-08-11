@@ -10,6 +10,10 @@ import {
   isMagentoConfigured,
   isSemanticConfigured,
 } from './config/env.js'
+import {
+  getDomainConfig,
+  getDomainConfigPath,
+} from './config/domainConfig.js'
 import { pingContextDatabase, pingSemanticDatabase } from './context/db.js'
 import { listMagentoFilterableAttributes } from './magento/attributes.js'
 import { magentoGraphql } from './magento/client.js'
@@ -87,6 +91,15 @@ app.get('/api/health', async (_req, res) => {
       fallbackMinScore: config.semantic.fallbackMinScore,
       ...semantic,
     },
+    domainConfig: (() => {
+      const domain = getDomainConfig()
+      return {
+        path: getDomainConfigPath(),
+        merchantName: domain.merchantName ?? null,
+        domains: domain.domains.map((d) => d.id),
+        intentRulesEnabled: domain.intentRules?.enabled !== false,
+      }
+    })(),
   })
 })
 
@@ -112,10 +125,14 @@ app.use('/api/semantic', semanticRouter)
 
 app.listen(config.port, () => {
   const info = getModelInfo()
+  const domain = getDomainConfig()
   console.log(`AI Commerce Assistant API on http://localhost:${config.port}`)
   console.log(`Ollama model: ${info.model} @ ${info.baseUrl}`)
   console.log(
     `Magento GraphQL: ${getMagentoGraphqlUrl() || '(not configured)'}`,
+  )
+  console.log(
+    `Domain config: ${domain.merchantName ?? 'default'} (${getDomainConfigPath()})`,
   )
   console.log(
     `Context memory: ${isContextMemoryConfigured() ? 'enabled' : 'disabled'}`,

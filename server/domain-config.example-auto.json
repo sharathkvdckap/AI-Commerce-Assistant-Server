@@ -1,0 +1,70 @@
+{
+  "merchantName": "Acme Auto Parts",
+  "systemHint": "This Magento catalog sells automotive spare parts and fluids. Never ask about clothing, gender fashion, or apparel fit. Focus on vehicle make/model/year, part type, brand, and budget.",
+  "intentRules": {
+    "enabled": false
+  },
+  "filterAttributes": {
+    "brand": ["manufacturer", "brand"],
+    "part_type": ["part_type"],
+    "vehicle_make": ["vehicle_make"],
+    "vehicle_model": ["vehicle_model"],
+    "color": ["color"]
+  },
+  "labelAliases": {
+    "chevy": ["chevrolet"],
+    "vw": ["volkswagen"]
+  },
+  "globalFilterHints": [],
+  "domains": [
+    {
+      "id": "auto",
+      "priority": 100,
+      "match": [
+        "\\b(brake|pad|rotor|oil|filter|spark\\s*plug|battery|alternator|wiper|tire|tyre|engine|transmission|radiator)\\b",
+        "\\b(car|truck|vehicle|auto|honda|toyota|ford|bmw)\\b"
+      ],
+      "filterHints": [
+        { "match": "\\bbrake\\s*pads?\\b", "set": { "part_type": "Brake pads" } },
+        { "match": "\\boil\\s*filter\\b", "set": { "part_type": "Oil filter" } },
+        { "match": "\\bspark\\s*plugs?\\b", "set": { "part_type": "Spark plugs" } },
+        { "match": "\\bbattery\\b", "set": { "part_type": "Battery" } },
+        { "match": "\\bhonda\\b", "set": { "vehicle_make": "Honda" } },
+        { "match": "\\btoyota\\b", "set": { "vehicle_make": "Toyota" } },
+        { "match": "\\bford\\b", "set": { "vehicle_make": "Ford" } }
+      ],
+      "enoughToSearch": {
+        "minClarifying": 1,
+        "requireAny": ["part_type", "vehicle_make"],
+        "immediateIfAny": [["part_type", "vehicle_make"]]
+      },
+      "clarify": [
+        {
+          "whenMissing": ["part_type"],
+          "message": "I can help you find the right auto part.",
+          "question": "What part do you need?",
+          "options": ["Brake pads", "Oil filter", "Spark plugs", "Battery", "Not sure"]
+        },
+        {
+          "whenMissing": ["vehicle_make"],
+          "message": "Got it.",
+          "question": "What is the vehicle make?",
+          "options": ["Honda", "Toyota", "Ford", "BMW", "Other"]
+        },
+        {
+          "whenMissingAll": ["price_min", "price_max"],
+          "message": "Almost there.",
+          "question": "What is your budget?",
+          "options": ["Under $50", "$50-$100", "Above $100"]
+        }
+      ]
+    }
+  ],
+  "defaultClarify": [
+    {
+      "message": "I can help you find the right part.",
+      "question": "What are you looking for today?",
+      "options": ["Brake parts", "Filters", "Battery", "Something else"]
+    }
+  ]
+}

@@ -19,8 +19,8 @@ export function ChatInput({
   const submit = () => {
     const trimmed = value.trim()
     if (!trimmed || disabled) return
-    onSend(trimmed)
     setValue('')
+    onSend(trimmed)
   }
 
   const onSubmit = (event: FormEvent) => {
@@ -34,6 +34,8 @@ export function ChatInput({
       submit()
     }
   }
+
+  const canSend = !disabled && value.trim().length > 0
 
   return (
     <form onSubmit={onSubmit} className="flex items-end gap-2">
@@ -51,12 +53,16 @@ export function ChatInput({
         )}
       />
       <Button
-        type="submit"
-        disabled={disabled || !value.trim()}
+        type="button"
+        disabled={!canSend}
+        onClick={(event) => {
+          event.preventDefault()
+          submit()
+        }}
         className="size-11 shrink-0 rounded-xl p-0"
         aria-label="Send message"
       >
-        <Send className="size-4" />
+        <Send className="size-4" aria-hidden />
       </Button>
     </form>
   )

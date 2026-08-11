@@ -1,0 +1,245 @@
+{
+  "merchantName": "Luma Demo (Apparel & Gear)",
+  "systemHint": "This Magento catalog is primarily apparel, outdoor gear, fitness accessories, and gifts. Prefer clothing/gear clarifying questions (category, gender, color, usage, budget). Do not ask industrial motor/part questions unless the customer clearly describes industrial equipment.",
+  "intentRules": {
+    "enabled": true
+  },
+  "filterAttributes": {
+    "color": ["color"],
+    "size": ["size"],
+    "material": ["material"],
+    "gender": ["gender"],
+    "climate": ["climate"],
+    "pattern": ["pattern"],
+    "usage": ["activity"],
+    "style": ["style_bottom", "style_general", "style_bags", "format"],
+    "fit": ["style_bottom", "style_general"],
+    "activity": ["activity"],
+    "sleeve": ["sleeve"],
+    "collar": ["collar"],
+    "strap": ["strap_bags"],
+    "features": ["features_bags"],
+    "category_gear": ["category_gear"]
+  },
+  "labelAliases": {
+    "grey": ["gray"],
+    "gray": ["grey"],
+    "navy": ["blue"],
+    "women": ["woman", "ladies", "female"],
+    "woman": ["women", "ladies", "female"],
+    "men": ["man", "male", "mens"],
+    "man": ["men", "male", "mens"],
+    "training": ["gym", "crosstraining", "athletic", "sports"],
+    "running": ["run"],
+    "run": ["running"],
+    "legging": ["leggings"]
+  },
+  "globalFilterHints": [
+    {
+      "match": "\\b(husband|boyfriend|dad|father|son|brother|him|his|male)\\b|\\bmen'?s?\\b",
+      "set": { "gender": "men" }
+    },
+    {
+      "match": "\\b(wife|girlfriend|mom|mother|daughter|sister|hers|female|ladies|woman)\\b|\\bwomen'?s?\\b|\\bher\\b",
+      "set": { "gender": "women" }
+    },
+    {
+      "match": "\\bgift\\b|\\bpresent\\b|\\bbirthday\\b|\\banniversary\\b",
+      "set": { "occasion": "gift" }
+    }
+  ],
+  "domains": [
+    {
+      "id": "industrial",
+      "priority": 100,
+      "match": [
+        "\\b(motor|shaft|bearing|grinding|industrial|hydraulic|pneumatic|coupling|gearbox|seal|gasket|replacement\\s+component|machine\\s+part|nema|servo|stepper)\\b"
+      ],
+      "filterHints": [
+        { "match": "\\bgrinding\\b", "set": { "symptom": "grinding noise" } },
+        { "match": "\\bshaft\\b", "set": { "part_family": "shaft" } },
+        { "match": "\\bmotor\\b", "set": { "equipment": "motor" } },
+        { "match": "\\bbearing\\b", "set": { "part_type": "bearing" } },
+        { "match": "\\bseal\\b", "set": { "part_type": "seal" } },
+        { "match": "\\bcoupling\\b", "set": { "part_type": "coupling" } },
+        { "match": "shaft\\s*collar|collar\\s*clamp", "set": { "part_type": "shaft collar" } },
+        { "match": "nema\\s*23|stepper", "set": { "motor_type": "stepper" } },
+        { "match": "servo", "set": { "motor_type": "servo" } },
+        { "match": "induction|ac motor|1\\s*hp", "set": { "motor_type": "ac induction" } },
+        { "match": "gear\\s*motor|12v", "set": { "motor_type": "gear motor" } }
+      ],
+      "enoughToSearch": {
+        "minClarifying": 2,
+        "requireAny": ["part_type", "motor_type", "category"]
+      },
+      "clarify": [
+        {
+          "whenMissing": ["part_type"],
+          "message": "I can help you find the right industrial replacement component.",
+          "question": "What kind of replacement component do you need?",
+          "options": ["Shaft / shaft collar", "Bearing", "Motor assembly", "Coupling / seal"]
+        },
+        {
+          "whenMissing": ["motor_type", "equipment_detail"],
+          "message": "Got it.",
+          "question": "What type of motor or equipment is this for?",
+          "options": ["AC induction motor", "Servo / stepper", "Gear motor", "Not sure"]
+        },
+        {
+          "message": "One more detail to narrow Magento results.",
+          "question": "Which best describes what you need?",
+          "options": ["Exact replacement part", "Compatible alternative", "Full motor unit", "Related accessories"]
+        }
+      ]
+    },
+    {
+      "id": "gift",
+      "priority": 80,
+      "match": [
+        "\\bgift\\b",
+        "\\bpresent\\b",
+        "\\bbirthday\\b",
+        "\\banniversary\\b",
+        "\\bfor my (husband|wife|dad|mom)\\b"
+      ],
+      "filterHints": [
+        { "match": "\\b(watches?|watch)\\b", "set": { "category": "Watches" } },
+        { "match": "\\b(bags?|backpack|duffel)\\b", "set": { "category": "Bags" } },
+        { "match": "\\b(jackets?|coat)\\b", "set": { "category": "Jackets" } },
+        { "match": "\\b(hoodie|sweatshirt)s?\\b", "set": { "category": "Hoodies & Sweatshirts" } }
+      ],
+      "enoughToSearch": {
+        "minClarifying": 2,
+        "requireAny": ["category"]
+      },
+      "clarify": [
+        {
+          "whenMissing": ["category"],
+          "message": "I’d love to help you pick a gift.",
+          "question": "What type of gift are you considering?",
+          "options": ["Watches", "Bags", "Jackets", "Hoodies & Sweatshirts"]
+        },
+        {
+          "whenMissing": ["color"],
+          "message": "Got it.",
+          "question": "Do you have a color preference?",
+          "options": ["Black", "Blue", "Gray", "Any color"]
+        },
+        {
+          "whenMissing": ["price_min", "price_max"],
+          "whenMissingAll": ["price_min", "price_max"],
+          "message": "Almost there.",
+          "question": "What is your budget?",
+          "options": ["Under $50", "$50-$100", "Above $100"]
+        }
+      ]
+    },
+    {
+      "id": "apparel",
+      "priority": 60,
+      "match": [
+        "\\b(pants?|trousers?|jackets?|hoodies?|sweatshirts?|shirts?|tees?|shoes?|sneakers?|clothing|apparel|outfit|capri|leggings?|shorts?|suits?|tracksuits?|activewear|athleisure|joggers?|tanks?|tops?|bottoms?|dress|dresses|skirt|skirts)\\b",
+        "\\b(gym|workout|training)\\s+(clothes|clothing|wear|outfit|suits?|pants?|shorts?)\\b",
+        "\\b(clothes|clothing|wear|outfit|suits?|pants?|shorts?)\\s+(for\\s+)?(the\\s+)?(gym|workout|training)\\b"
+      ],
+      "filterHints": [
+        { "match": "\\b(watches?|watch)\\b", "set": { "category": "Watches" } },
+        { "match": "\\b(bags?|backpack|duffel)\\b", "set": { "category": "Bags" } },
+        { "match": "\\b(jackets?|coat)\\b", "set": { "category": "Jackets" } },
+        { "match": "\\b(pants?|trousers?|joggers?|track\\s*pants?|tracksuits?|suits?)\\b", "set": { "category": "Pants" } },
+        { "match": "\\b(hoodie|sweatshirt)s?\\b", "set": { "category": "Hoodies & Sweatshirts" } },
+        { "match": "\\b(shorts?)\\b", "set": { "category": "Shorts" } },
+        { "match": "\\b(tees?|t-?shirts?)\\b", "set": { "category": "Tees" } },
+        { "match": "\\b(gym|workout|training|athletic|sports?)\\b", "set": { "usage": "training" } },
+        { "match": "relax(ed)?", "set": { "fit": "relaxed" } },
+        { "match": "\\bslim\\b", "set": { "fit": "slim" } },
+        { "match": "regular\\s*fit", "set": { "fit": "regular" } },
+        { "match": "\\btraining\\b|^(training|train)$", "set": { "usage": "training" } },
+        { "match": "\\brunning\\b|^(running|run)$", "set": { "usage": "running" } },
+        { "match": "\\bcasual\\b|^casual$", "set": { "usage": "casual" } }
+      ],
+      "enoughToSearch": {
+        "minClarifying": 2,
+        "requireAny": ["category", "usage", "style"],
+        "immediateIfAny": [
+          ["category", "color"],
+          ["category", "gender"],
+          ["category", "color", "gender"]
+        ]
+      },
+      "clarify": [
+        {
+          "whenMissing": ["category"],
+          "message": "I can help narrow that down.",
+          "question": "What type of product are you looking for?",
+          "options": ["Pants", "Jackets", "Bags", "Watches", "Hoodies & Sweatshirts"]
+        },
+        {
+          "whenMissingAll": ["usage", "style"],
+          "message": "Great choice.",
+          "question": "What will you mainly use it for?",
+          "options": ["Training", "Running", "Casual", "Everyday"]
+        },
+        {
+          "whenMissing": ["color"],
+          "message": "Got it.",
+          "question": "Do you have a color preference?",
+          "options": ["Black", "Blue", "Gray", "Any color"]
+        },
+        {
+          "whenMissingAll": ["price_min", "price_max"],
+          "message": "Almost there.",
+          "question": "What is your budget?",
+          "options": ["Under $50", "$50-$100", "Above $100"]
+        }
+      ]
+    },
+    {
+      "id": "gear",
+      "priority": 40,
+      "match": [
+        "\\b(bag|watch|fitness\\s+equipment|yoga\\s+mat|backpack|duffel|treadmill|dumbbell|kettlebell|exercise\\s+bike|cycle\\s+equipment)\\b",
+        "\\b(fitness|yoga)\\b"
+      ],
+      "filterHints": [
+        { "match": "\\b(watches?|watch)\\b", "set": { "category": "Watches" } },
+        { "match": "\\b(bags?|backpack|duffel)\\b", "set": { "category": "Bags" } }
+      ],
+      "enoughToSearch": {
+        "minClarifying": 2,
+        "requireAny": ["category", "usage", "style"],
+        "immediateIfAny": [
+          ["category", "color"],
+          ["category", "gender"]
+        ]
+      },
+      "clarify": [
+        {
+          "whenMissing": ["category"],
+          "message": "I can help narrow that down.",
+          "question": "What type of product are you looking for?",
+          "options": ["Bags", "Watches", "Fitness Equipment", "Yoga"]
+        },
+        {
+          "whenMissing": ["color"],
+          "message": "Got it.",
+          "question": "Do you have a color preference?",
+          "options": ["Black", "Blue", "Gray", "Any color"]
+        },
+        {
+          "whenMissingAll": ["price_min", "price_max"],
+          "message": "Almost there.",
+          "question": "What is your budget?",
+          "options": ["Under $50", "$50-$100", "Above $100"]
+        }
+      ]
+    }
+  ],
+  "defaultClarify": [
+    {
+      "message": "I can help you find the right product.",
+      "question": "What type of product are you looking for?",
+      "options": ["Apparel", "Gear / accessories", "Gift", "Something else"]
+    }
+  ]
+}

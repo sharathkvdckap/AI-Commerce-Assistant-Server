@@ -58,6 +58,11 @@ export const config = {
       0.8,
     ),
   },
+  /**
+   * Merchant vertical config (domains, clarify steps, attribute maps).
+   * Default: server/domain-config.json — override with DOMAIN_CONFIG_PATH.
+   */
+  domainConfigPath: process.env.DOMAIN_CONFIG_PATH?.trim() || '',
 }
 
 export function isMagentoConfigured(): boolean {

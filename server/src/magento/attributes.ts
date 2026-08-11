@@ -1,4 +1,5 @@
 import type { ProductFilters } from '../ai/engine.js'
+import { getDomainConfig } from '../config/domainConfig.js'
 import { magentoGraphql } from './client.js'
 
 interface AttributeOption {
@@ -42,8 +43,9 @@ const RESERVED_FILTER_FIELDS = new Set([
 /**
  * Soft ProductFilters keys → preferred Magento attribute codes (in priority order).
  * Unknown Magento attributes are skipped at resolve time.
+ * Overridden / extended by domain-config.json → filterAttributes.
  */
-const FILTER_FIELD_TO_ATTRIBUTES: Record<string, string[]> = {
+const DEFAULT_FILTER_FIELD_TO_ATTRIBUTES: Record<string, string[]> = {
   color: ['color'],
   size: ['size'],
   material: ['material'],
@@ -62,7 +64,7 @@ const FILTER_FIELD_TO_ATTRIBUTES: Record<string, string[]> = {
 }
 
 /** Soft label aliases → Magento option labels (lowercase). */
-const LABEL_ALIASES: Record<string, string[]> = {
+const DEFAULT_LABEL_ALIASES: Record<string, string[]> = {
   grey: ['gray'],
   gray: ['grey'],
   navy: ['blue'],
@@ -74,6 +76,22 @@ const LABEL_ALIASES: Record<string, string[]> = {
   running: ['run'],
   run: ['running'],
   legging: ['leggings'],
+}
+
+function getFilterFieldToAttributes(): Record<string, string[]> {
+  const cfg = getDomainConfig()
+  if (!cfg.filterAttributes || Object.keys(cfg.filterAttributes).length === 0) {
+    return DEFAULT_FILTER_FIELD_TO_ATTRIBUTES
+  }
+  return { ...DEFAULT_FILTER_FIELD_TO_ATTRIBUTES, ...cfg.filterAttributes }
+}
+
+function getLabelAliases(): Record<string, string[]> {
+  const cfg = getDomainConfig()
+  if (!cfg.labelAliases || Object.keys(cfg.labelAliases).length === 0) {
+    return DEFAULT_LABEL_ALIASES
+  }
+  return { ...DEFAULT_LABEL_ALIASES, ...cfg.labelAliases }
 }
 
 /** Boolean Magento attrs — only apply on explicit intent phrases. */
@@ -136,7 +154,8 @@ function normalizeLabel(label: string): string {
 function candidateLabels(raw: string): string[] {
   const needle = normalizeLabel(raw)
   if (!needle) return []
-  return [...new Set([needle, ...(LABEL_ALIASES[needle] ?? []).map(normalizeLabel)])]
+  const aliases = getLabelAliases()
+  return [...new Set([needle, ...(aliases[needle] ?? []).map(normalizeLabel)])]
 }
 
 async function loadAllFilterableAttributes(): Promise<{
@@ -399,7 +418,7 @@ export async function resolveMagentoAttributeFilters(
   }
 
   // 1) Explicit ProductFilters fields → preferred Magento attributes
-  for (const [filterKey, attrCodes] of Object.entries(FILTER_FIELD_TO_ATTRIBUTES)) {
+  for (const [filterKey, attrCodes] of Object.entries(getFilterFieldToAttributes())) {
     const raw = filters[filterKey]
     if (raw == null || raw === '' || String(raw).toLowerCase() === 'any') continue
     pushHits(
@@ -434,8 +453,25 @@ export async function resolveMagentoAttributeFilters(
   }
 
   // 3) Scan query tokens/phrases against ALL Magento option labels
+  // Never treat budget amounts as size/other attributes (e.g. "below $30" → size 30)
+  const budgetAmounts = new Set<string>()
+  for (const key of ['price_min', 'price_max'] as const) {
+    const v = filters[key]
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      budgetAmounts.add(String(Math.round(v)))
+      budgetAmounts.add(String(v))
+    }
+  }
+  const budgetStripped = queryText
+    .replace(
+      /(?:below|under|less\s+than|upto|up\s+to|above|over|more\s+than|at\s+least|from|between|budget)\s*\$?\s*\d+(?:\.\d+)?/gi,
+      ' ',
+    )
+    .replace(/\$\s*\d+(?:\.\d+)?/g, ' ')
+    .replace(/\b\d+\s*(?:dollars?|bucks)\b/gi, ' ')
+
   const scanText = [
-    queryText,
+    budgetStripped,
     String(filters.category ?? ''),
     String(filters.usage ?? ''),
     String(filters.style ?? ''),
@@ -456,11 +492,16 @@ export async function resolveMagentoAttributeFilters(
     if (usedCodes.size >= maxAttributes) break
     // Skip ultra-generic tokens that explode matches
     if (
-      ['the', 'and', 'for', 'with', 'any', 'product', 'products', 'item'].includes(
+      ['the', 'and', 'for', 'with', 'any', 'product', 'products', 'item', 'men', 'mens', 'women', 'womens'].includes(
         phrase,
       )
     ) {
       continue
+    }
+    // Bare numbers are sizes only when filters.size was set — never from budget
+    if (/^\d+(\.\d+)?$/.test(phrase)) {
+      if (budgetAmounts.has(phrase)) continue
+      if (filters.size == null || filters.size === '') continue
     }
     pushHits(matchOptionsForValue(labelIndex, attributes, phrase, undefined, false))
   }
