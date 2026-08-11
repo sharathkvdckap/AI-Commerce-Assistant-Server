@@ -95,12 +95,75 @@ const EQUIPMENT_WORDS = new Set([
   'dumbbell',
   'dumbbells',
   'kettlebell',
+  'kettlebells',
+  'barbell',
+  'barbells',
   'treadmill',
   'bike',
   'cycle',
   'elliptical',
   'machine',
+  'strength',
+  'weightlifting',
+  'powerlifting',
+  'cardio',
+  'weights',
+  'weight',
+  'resistance',
+  'yoga',
 ])
+
+/**
+ * True when the customer wants fitness / workout *equipment* (not gym clothes).
+ * Examples: "strength training", "dumbbells", "home gym equipment".
+ */
+export function isFitnessEquipmentIntent(text: string): boolean {
+  const lower = text.toLowerCase()
+  if (isApparelClothingIntent(lower)) return false
+
+  return (
+    /\b(strength(\s+training)?|weight\s*lifting|weightlifting|weight\s*training|resistance\s*training|powerlifting|bodybuilding)\b/.test(
+      lower,
+    ) ||
+    /\b(dumbbells?|kettlebells?|barbells?|treadmills?|ellipticals?|rowing\s*machines?|exercise\s*bikes?|spin\s*bikes?)\b/.test(
+      lower,
+    ) ||
+    /\b(fitness|gym|workout|exercise|cardio|training)\s+equipment\b/.test(
+      lower,
+    ) ||
+    /\bequipment\s+for\s+(strength|weight|gym|workout|training|cardio|fitness)\b/.test(
+      lower,
+    ) ||
+    /\b(home\s*gym|gym\s*machine|weight\s*bench|foam\s*roller|resistance\s*bands?|yoga\s*mats?|jump\s*ropes?)\b/.test(
+      lower,
+    ) ||
+    /\b(something|gear|kit|accessories)\s+for\s+(strength|weightlifting|weight\s*training|powerlifting)\b/.test(
+      lower,
+    ) ||
+    /\bfor\s+strength(\s+training)?\b/.test(lower) ||
+    (/\bfitness\b/.test(lower) &&
+      !/\b(clothes|clothing|wear|outfit|tee|shirt|pant|short|hoodie)\b/.test(
+        lower,
+      ))
+  )
+}
+
+/** True when the customer clearly wants wearable apparel (including gym clothes). */
+export function isApparelClothingIntent(text: string): boolean {
+  const lower = text.toLowerCase()
+  return (
+    /\b(pants?|trousers?|jackets?|hoodies?|sweatshirts?|shirts?|tees?|shoes?|sneakers?|clothing|clothes|apparel|outfit|outfits|wear|capri|leggings?|shorts?|suits?|tracksuits?|activewear|athleisure|joggers?|tanks?|tops?|bottoms?|dress|dresses|skirt|skirts)\b/.test(
+      lower,
+    ) ||
+    /\b(gym|workout|training|fitness)\s+(clothes|clothing|wear|outfit|suits?|pants?|shorts?|tees?|hoodies?)\b/.test(
+      lower,
+    ) ||
+    /\b(clothes|clothing|wear|outfit|suits?|pants?|shorts?|tees?)\s+(for\s+)?(the\s+)?(gym|workout|training|fitness)\b/.test(
+      lower,
+    )
+  )
+}
+
 
 const GIFT_WORDS = new Set([
   'gift',
@@ -201,7 +264,28 @@ function normalizeToken(token: string): string[] {
     variants.add('apparel')
   }
 
-  // Gym / workout as activity context for apparel, not "Fitness Equipment" alone
+  // Strength / equipment vocabulary → Fitness Equipment aisle
+  if (
+    [
+      'strength',
+      'weightlifting',
+      'powerlifting',
+      'dumbbell',
+      'dumbbells',
+      'kettlebell',
+      'kettlebells',
+      'barbell',
+      'cardio',
+      'weights',
+      'equipment',
+    ].includes(token)
+  ) {
+    variants.add('fitness')
+    variants.add('equipment')
+    variants.add('strength')
+  }
+
+  // Gym / workout / training as activity — apparel only when clothing nouns exist
   if (['gym', 'workout', 'training', 'athletic'].includes(token)) {
     variants.add('training')
   }
@@ -287,6 +371,24 @@ function scoreCategory(cat: FlatCategory, tokens: string[]): number {
     return 0
   }
 
+  // Strength / equipment vocabulary strongly prefers Fitness Equipment
+  if (equipmentTokens.length > 0 && isFitnessEquipment && apparelTokens.length === 0) {
+    score += 22
+  }
+  // Soft-penalize apparel leaves when the query is equipment-only
+  if (
+    equipmentTokens.length > 0 &&
+    apparelTokens.length === 0 &&
+    !isFitnessEquipment &&
+    (pathText.includes('men') ||
+      pathText.includes('women') ||
+      ['tees', 'pants', 'shorts', 'hoodies & sweatshirts', 'jackets', 'tanks'].includes(
+        cat.nameLower,
+      ))
+  ) {
+    score -= 6
+  }
+
   // Industrial queries prefer Industrial Products / related categories
   if (industrialTokens.length > 0) {
     if (
@@ -369,18 +471,37 @@ function scoreCategory(cat: FlatCategory, tokens: string[]): number {
       continue
     }
 
-    // Gym/training as soft boost for apparel leaves, not for Fitness Equipment
+    // Gym/training soft boost:
+    // - with clothing nouns → apparel leaves
+    // - with equipment / strength intent → Fitness Equipment
     if (['gym', 'workout', 'training', 'athletic'].includes(token)) {
-      if (isFitnessEquipment && apparelTokens.length > 0) continue
+      if (isFitnessEquipment && apparelTokens.length > 0 && equipmentTokens.length === 0) {
+        continue
+      }
+      if (isFitnessEquipment && equipmentTokens.length > 0) {
+        score += 18
+        continue
+      }
       if (
-        pathText.includes('men') ||
-        pathText.includes('women') ||
-        ['pants', 'shorts', 'hoodies & sweatshirts', 'tees', 'jackets'].includes(
-          cat.nameLower,
-        )
+        apparelTokens.length > 0 &&
+        (pathText.includes('men') ||
+          pathText.includes('women') ||
+          ['pants', 'shorts', 'hoodies & sweatshirts', 'tees', 'jackets'].includes(
+            cat.nameLower,
+          ))
       ) {
         score += 3
       }
+      continue
+    }
+
+    if (
+      ['strength', 'weightlifting', 'powerlifting', 'weights', 'cardio', 'yoga'].includes(
+        token,
+      )
+    ) {
+      if (isFitnessEquipment) score += 20
+      else if (apparelTokens.length === 0) score -= 4
       continue
     }
 
@@ -475,6 +596,17 @@ export async function matchCategoriesFromSearch(
 export function preferredApparelCategoryNames(query: string): string[] {
   const lower = query.toLowerCase()
 
+  // Equipment / strength intent → Magento Fitness Equipment first (not clothes)
+  if (isFitnessEquipmentIntent(lower)) {
+    return [
+      'Fitness Equipment',
+      'Yoga',
+      'Bags',
+      'Watches',
+      'Tees',
+    ]
+  }
+
   if (/\b(watches?|watch)\b/.test(lower)) {
     return ['Analog', 'Digital', 'Smartwatch', 'Sport', 'Luxury / dress']
   }
@@ -502,11 +634,8 @@ export function preferredApparelCategoryNames(query: string): string[] {
   if (/\b(shoes?|sneakers?|footwear)\b/.test(lower)) {
     return ['Training', 'Running', 'Casual', 'Everyday']
   }
-  if (
-    /\b(gym|fitness|workout|athletic|training|clothes|clothing|apparel|wear|outfit|outfits)\b/.test(
-      lower,
-    )
-  ) {
+  // Gym *clothes* / apparel browse — clothes first; equipment is optional last
+  if (isApparelClothingIntent(lower)) {
     return [
       'Tees',
       'Shorts',
@@ -514,6 +643,21 @@ export function preferredApparelCategoryNames(query: string): string[] {
       'Hoodies & Sweatshirts',
       'Jackets',
       'Fitness Equipment',
+    ]
+  }
+  // Gym/fitness activity without clothing nouns → equipment first
+  // (Bare "Training" / "Athletic" chips are apparel usage — do not flip those.)
+  if (
+    /\b(gym|fitness|workout)\b/.test(lower) &&
+    !isApparelClothingIntent(lower) &&
+    !/^(training|train|athletic|running|run|casual)$/i.test(lower.trim())
+  ) {
+    return [
+      'Fitness Equipment',
+      'Tees',
+      'Shorts',
+      'Pants',
+      'Hoodies & Sweatshirts',
     ]
   }
 

@@ -150,11 +150,14 @@
         { "match": "\\b(hoodie|sweatshirt)s?\\b", "set": { "category": "Hoodies & Sweatshirts" } },
         { "match": "\\b(shorts?)\\b", "set": { "category": "Shorts" } },
         { "match": "\\b(tees?|t-?shirts?)\\b", "set": { "category": "Tees" } },
-        { "match": "\\b(gym|workout|training|athletic|sports?)\\b", "set": { "usage": "training" } },
+        {
+          "match": "\\b(gym|workout|training|athletic|sports?)\\s+(clothes|clothing|wear|outfit|suits?|pants?|shorts?|tees?|hoodies?)\\b|\\b(clothes|clothing|wear|outfit|suits?|pants?|shorts?|tees?)\\s+(for\\s+)?(the\\s+)?(gym|workout|training)\\b",
+          "set": { "usage": "training" }
+        },
         { "match": "relax(ed)?", "set": { "fit": "relaxed" } },
         { "match": "\\bslim\\b", "set": { "fit": "slim" } },
         { "match": "regular\\s*fit", "set": { "fit": "regular" } },
-        { "match": "\\btraining\\b|^(training|train)$", "set": { "usage": "training" } },
+        { "match": "^(training|train)$", "set": { "usage": "training" } },
         { "match": "\\brunning\\b|^(running|run)$", "set": { "usage": "running" } },
         { "match": "\\bcasual\\b|^casual$", "set": { "usage": "casual" } }
       ],
@@ -196,19 +199,31 @@
     },
     {
       "id": "gear",
-      "priority": 40,
+      "priority": 70,
       "match": [
-        "\\b(bag|watch|fitness\\s+equipment|yoga\\s+mat|backpack|duffel|treadmill|dumbbell|kettlebell|exercise\\s+bike|cycle\\s+equipment)\\b",
+        "\\b(strength(\\s+training)?|weight\\s*lifting|weightlifting|weight\\s*training|resistance\\s*training|powerlifting|bodybuilding)\\b",
+        "\\b(dumbbells?|kettlebells?|barbells?|treadmills?|ellipticals?|rowing\\s*machines?|exercise\\s*bikes?)\\b",
+        "\\b(fitness|gym|workout|exercise|cardio|training)\\s+equipment\\b",
+        "\\b(home\\s*gym|foam\\s*roller|resistance\\s*bands?|yoga\\s*mats?)\\b",
+        "\\b(something|gear|kit)\\s+for\\s+(strength|weightlifting|weight\\s*training|powerlifting)\\b",
+        "\\bfor\\s+strength(\\s+training)?\\b",
+        "\\b(bags?|watches?|watch|fitness\\s+equipment|yoga\\s+mat|backpack|duffel|treadmill|dumbbell|kettlebell|exercise\\s+bike|cycle\\s+equipment)\\b",
         "\\b(fitness|yoga)\\b"
       ],
       "filterHints": [
+        {
+          "match": "\\b(strength(\\s+training)?|weight\\s*lifting|weightlifting|weight\\s*training|resistance\\s*training|powerlifting|dumbbells?|kettlebells?|barbells?|fitness\\s*equipment|home\\s*gym|for\\s+strength)\\b",
+          "set": { "category": "Fitness Equipment", "domain": "gear" }
+        },
+        { "match": "\\b(yoga\\s*mats?|yoga)\\b", "set": { "category": "Fitness Equipment", "style": "yoga" } },
         { "match": "\\b(watches?|watch)\\b", "set": { "category": "Watches" } },
         { "match": "\\b(bags?|backpack|duffel)\\b", "set": { "category": "Bags" } }
       ],
       "enoughToSearch": {
-        "minClarifying": 2,
+        "minClarifying": 1,
         "requireAny": ["category", "usage", "style"],
         "immediateIfAny": [
+          ["category"],
           ["category", "color"],
           ["category", "gender"]
         ]
@@ -218,13 +233,14 @@
           "whenMissing": ["category"],
           "message": "I can help narrow that down.",
           "question": "What type of product are you looking for?",
-          "options": ["Bags", "Watches", "Fitness Equipment", "Yoga"]
+          "options": ["Fitness Equipment", "Bags", "Watches", "Yoga"]
         },
         {
-          "whenMissing": ["color"],
+          "whenMissing": ["style"],
+          "whenMissingAll": ["style"],
           "message": "Got it.",
-          "question": "Do you have a color preference?",
-          "options": ["Black", "Blue", "Gray", "Any color"]
+          "question": "What kind of fitness gear do you need?",
+          "options": ["Yoga", "Weights", "Cardio accessories", "Not sure"]
         },
         {
           "whenMissingAll": ["price_min", "price_max"],
