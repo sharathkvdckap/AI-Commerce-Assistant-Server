@@ -1,4 +1,6 @@
+import { useEffect, useRef } from 'react'
 import { ProductCard } from '@/components/assistant/ProductCard'
+import { trackImpressions } from '@/api/analytics'
 import type { ProductRecommendation } from '@/types/assistant'
 
 interface ProductGridProps {
@@ -6,6 +8,8 @@ interface ProductGridProps {
   alternatives?: ProductRecommendation[]
   source?: 'magento' | 'semantic' | 'hybrid' | null
   matchType?: 'exact' | 'recommended' | 'mixed' | 'none' | null
+  sessionId?: string | null
+  searchId?: string | null
 }
 
 export function ProductGrid({
@@ -13,9 +17,34 @@ export function ProductGrid({
   alternatives = [],
   source,
   matchType,
+  sessionId,
+  searchId,
 }: ProductGridProps) {
   const hasMatches = products.length > 0
   const hasAlternatives = alternatives.length > 0
+  const impressedKey = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!hasMatches && !hasAlternatives) return
+    const key = `${searchId ?? sessionId ?? 'none'}:${products.map((p) => p.sku).join(',')}:${alternatives.map((p) => p.sku).join(',')}`
+    if (impressedKey.current === key) return
+    impressedKey.current = key
+    trackImpressions({
+      sessionId,
+      searchId,
+      source,
+      products,
+      alternatives,
+    })
+  }, [
+    alternatives,
+    hasAlternatives,
+    hasMatches,
+    products,
+    searchId,
+    sessionId,
+    source,
+  ])
 
   const matchTitle =
     matchType === 'recommended' && !hasMatches
@@ -44,8 +73,16 @@ export function ProductGrid({
             <p className="mt-1 text-sm text-ink-muted">{matchSourceLabel}</p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {products.map((product) => (
-              <ProductCard key={product.id} product={product} />
+            {products.map((product, position) => (
+              <ProductCard
+                key={product.id}
+                product={product}
+                listType="primary"
+                position={position}
+                sessionId={sessionId}
+                searchId={searchId}
+                source={source}
+              />
             ))}
           </div>
         </section>
@@ -64,8 +101,16 @@ export function ProductGrid({
             </p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {alternatives.map((product) => (
-              <ProductCard key={`alt-${product.id}`} product={product} />
+            {alternatives.map((product, position) => (
+              <ProductCard
+                key={`alt-${product.id}`}
+                product={product}
+                listType="alternative"
+                position={position}
+                sessionId={sessionId}
+                searchId={searchId}
+                source={source}
+              />
             ))}
           </div>
         </section>

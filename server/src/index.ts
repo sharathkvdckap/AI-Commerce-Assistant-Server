@@ -18,8 +18,10 @@ import { pingContextDatabase, pingSemanticDatabase } from './context/db.js'
 import { listMagentoFilterableAttributes } from './magento/attributes.js'
 import { magentoGraphql } from './magento/client.js'
 import { assistantRouter } from './routes/assistant.js'
+import { analyticsRouter } from './routes/analytics.js'
 import { contextRouter } from './routes/context.js'
 import { semanticRouter } from './routes/semantic.js'
+import { isAnalyticsConfigured } from './analytics/index.js'
 
 const app = express()
 app.use(cors())
@@ -91,6 +93,10 @@ app.get('/api/health', async (_req, res) => {
       fallbackMinScore: config.semantic.fallbackMinScore,
       ...semantic,
     },
+    analytics: {
+      enabled: isAnalyticsConfigured(),
+      note: 'Zero-result, hybrid lift, CTR — requires DATABASE_URL + db:migrate:analytics',
+    },
     domainConfig: (() => {
       const domain = getDomainConfig()
       return {
@@ -122,6 +128,7 @@ app.get('/api/magento/attributes', async (_req, res) => {
 app.use('/api/assistant', assistantRouter)
 app.use('/api/context', contextRouter)
 app.use('/api/semantic', semanticRouter)
+app.use('/api/analytics', analyticsRouter)
 
 app.listen(config.port, () => {
   const info = getModelInfo()
@@ -139,5 +146,8 @@ app.listen(config.port, () => {
   )
   console.log(
     `Semantic search: ${isSemanticConfigured() ? 'enabled' : 'disabled'}`,
+  )
+  console.log(
+    `Analytics: ${isAnalyticsConfigured() ? 'enabled' : 'disabled'}`,
   )
 })

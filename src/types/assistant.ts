@@ -45,6 +45,7 @@ export interface AskQuestionResponse {
 
 export interface SearchProductsResponse {
   sessionId?: string
+  searchId?: string | null
   action: 'search_products'
   message?: string
   filters: ProductFilters

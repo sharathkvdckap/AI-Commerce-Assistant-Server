@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { runAssistantTurn, type AiResponse, type ProductFilters } from '../ai/engine.js'
+import { trackSearchAnalytics } from '../analytics/index.js'
 import { isContextMemoryConfigured } from '../config/env.js'
 import { contextRecommendationService } from '../context/services/ContextRecommendationService.js'
 import { findDirectSkuOrNameMatch } from '../magento/search.js'
@@ -133,6 +134,42 @@ async function persistSessionContext(
   }
 }
 
+function resolveQuery(session: AssistantSession, fallback?: string): string {
+  if (typeof session.filters.query === 'string' && session.filters.query.trim()) {
+    return session.filters.query.trim()
+  }
+  const fromHistory = session.messages.find((m) => m.role === 'user')?.content
+  return (fromHistory ?? fallback ?? '').trim()
+}
+
+/** Log search analytics (Postgres). Returns searchId for CTR linking. */
+async function logSearchAnalytics(
+  session: AssistantSession,
+  extras: {
+    products?: Array<{ sku?: string; id?: string }>
+    alternatives?: Array<{ sku?: string; id?: string }>
+    source?: string
+    matchType?: string
+    fromMemory?: boolean
+    queryFallback?: string
+  },
+): Promise<string | null> {
+  const userId = session.userId ?? 'anonymous'
+  const originalQuery = resolveQuery(session, extras.queryFallback)
+  if (!originalQuery) return null
+  return trackSearchAnalytics({
+    userId,
+    sessionId: session.id,
+    originalQuery,
+    filters: session.filters as Record<string, unknown>,
+    source: extras.source,
+    matchType: extras.matchType,
+    products: extras.products,
+    alternatives: extras.alternatives,
+    fromMemory: extras.fromMemory,
+  })
+}
+
 export const assistantRouter = Router()
 
 assistantRouter.post('/start', async (req, res) => {
@@ -172,10 +209,20 @@ assistantRouter.post('/start', async (req, res) => {
         session.status = 'completed'
         saveSession(session)
 
+        const searchId = await logSearchAnalytics(session, {
+          products: replayed.products,
+          alternatives: replayed.alternatives,
+          source: replayed.source,
+          matchType: replayed.matchType,
+          fromMemory: true,
+          queryFallback: query,
+        })
+
         // Not persisted as new context: replaying is not a new search, and
         // continuePrevious() already recorded the reuse.
         res.json({
           sessionId: session.id,
+          searchId,
           action: 'search_products' as const,
           message,
           filters: session.filters,
@@ -216,8 +263,17 @@ assistantRouter.post('/start', async (req, res) => {
         matchType: direct.matchType,
       })
 
+      const searchId = await logSearchAnalytics(session, {
+        products: direct.products,
+        alternatives: direct.alternatives,
+        source: 'magento',
+        matchType: direct.matchType,
+        queryFallback: query,
+      })
+
       res.json({
         sessionId: session.id,
+        searchId,
         action: 'search_products' as const,
         message,
         filters: session.filters,
@@ -280,8 +336,17 @@ assistantRouter.post('/start', async (req, res) => {
       matchType: result.matchType,
     })
 
+    const searchId = await logSearchAnalytics(session, {
+      products: result.products,
+      alternatives: result.alternatives,
+      source: result.source,
+      matchType: result.matchType,
+      queryFallback: query,
+    })
+
     res.json({
       ...toClientResponse(session.id, { ...ai, filters: searchFilters }),
+      searchId,
       products: result.products,
       alternatives: result.alternatives,
       source: result.source,
@@ -376,8 +441,16 @@ assistantRouter.post('/message', async (req, res) => {
       matchType: result.matchType,
     })
 
+    const searchId = await logSearchAnalytics(session, {
+      products: result.products,
+      alternatives: result.alternatives,
+      source: result.source,
+      matchType: result.matchType,
+    })
+
     res.json({
       ...toClientResponse(session.id, { ...ai, filters: searchFilters }),
+      searchId,
       products: result.products,
       alternatives: result.alternatives,
       source: result.source,

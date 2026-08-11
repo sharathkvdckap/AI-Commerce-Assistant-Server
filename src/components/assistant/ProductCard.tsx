@@ -2,10 +2,16 @@ import { ExternalLink } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { trackProductClick } from '@/api/analytics'
 import type { ProductRecommendation } from '@/types/assistant'
 
 interface ProductCardProps {
   product: ProductRecommendation
+  listType?: 'primary' | 'alternative'
+  position?: number
+  sessionId?: string | null
+  searchId?: string | null
+  source?: string | null
 }
 
 function formatPrice(price: number, currency: string) {
@@ -16,8 +22,29 @@ function formatPrice(price: number, currency: string) {
   }).format(price)
 }
 
-export function ProductCard({ product }: ProductCardProps) {
+export function ProductCard({
+  product,
+  listType = 'primary',
+  position,
+  sessionId,
+  searchId,
+  source,
+}: ProductCardProps) {
   const inStock = product.inStock !== false
+
+  const openProduct = () => {
+    trackProductClick({
+      sessionId,
+      searchId,
+      source,
+      product,
+      listType,
+      position,
+    })
+    if (product.productUrl !== '#') {
+      window.open(product.productUrl, '_blank', 'noopener,noreferrer')
+    }
+  }
 
   return (
     <Card
@@ -83,14 +110,7 @@ export function ProductCard({ product }: ProductCardProps) {
           </ul>
         </div>
 
-        <Button
-          className="mt-1 w-full"
-          onClick={() => {
-            if (product.productUrl !== '#') {
-              window.open(product.productUrl, '_blank', 'noopener,noreferrer')
-            }
-          }}
-        >
+        <Button className="mt-1 w-full" onClick={openProduct}>
           View Product
           <ExternalLink className="size-3.5 opacity-80" />
         </Button>

@@ -106,6 +106,8 @@ export function useAssistant() {
     useState<PendingContextReuse | null>(null)
   const [sessionKey, setSessionKey] = useState(0)
   const sessionIdRef = useRef<string | null>(null)
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [searchId, setSearchId] = useState<string | null>(null)
   const submittingRef = useRef(false)
   const userIdRef = useRef<string>(getOrCreateUserId())
 
@@ -113,9 +115,11 @@ export function useAssistant() {
     (response: Awaited<ReturnType<typeof startAssistant>>) => {
       if (response.sessionId) {
         sessionIdRef.current = response.sessionId
+        setSessionId(response.sessionId)
       }
 
       if (isAskResponse(response)) {
+        setSearchId(null)
         setFilters(response.filters ?? {})
         const content = formatAskContent(response.message, response.question)
         setMessages((prev) => {
@@ -136,6 +140,7 @@ export function useAssistant() {
         return
       }
 
+      setSearchId(response.searchId ?? null)
       setFilters(response.filters ?? {})
       const isEmpty =
         response.matchType === 'none' ||
@@ -232,6 +237,8 @@ export function useAssistant() {
       setIsComplete(false)
       setError(null)
       setPendingContext(null)
+      setSessionId(null)
+      setSearchId(null)
       setIsThinking(true)
 
       try {
@@ -318,6 +325,8 @@ export function useAssistant() {
     setIsThinking(false)
     setHasStarted(false)
     setPendingContext(null)
+    setSessionId(null)
+    setSearchId(null)
 
     const fromUrl = readQueryParam()
     if (fromUrl) {
@@ -394,6 +403,8 @@ export function useAssistant() {
     hasStarted,
     error,
     pendingContext,
+    sessionId,
+    searchId,
     answerQuestion,
     submitAnswer,
     continuePreviousContext,

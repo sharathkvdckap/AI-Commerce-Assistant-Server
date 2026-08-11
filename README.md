@@ -249,6 +249,91 @@ This keeps apparel vs industrial / auto prompts and Magento attribute mapping al
 | `POST` | `/api/context/continue` | Replay previous search |
 | `POST` | `/api/context/clear` | Clear user context |
 
+### Analytics (ROI)
+
+Requires `DATABASE_URL` + `npm run db:migrate:analytics`.
+
+| Method | Path | Description |
+| ------ | ---- | ----------- |
+| `GET` | `/api/analytics/status` | Enabled? |
+| `GET` | `/api/analytics/summary?days=30` | Zero-result, hybrid share, CTR, top queries/SKUs |
+| `GET` | `/api/analytics/searches` | Recent searches (what / how / whom) |
+| `POST` | `/api/analytics/track` | Product impressions & clicks |
+
+React UI: [http://localhost:5173/analytics](http://localhost:5173/analytics)  
+Magento Admin (merged into **Klizer_AiCommerceAssistant**): `/admin/aicommerceassistant/dashboard/index`
+
+---
+
+## Analytics setup
+
+Search ROI metrics (zero-result rate, hybrid/semantic share, CTR) are stored in Postgres and shown in:
+
+1. **React** — header link → `/analytics`
+2. **Magento Admin** — **AI Commerce Assistant → Search ROI Dashboard** (same Node API)
+
+`Klizer_AiCommerceAnalytics` was merged into `Klizer_AiCommerceAssistant` — maintain **one** Magento module only.
+
+### 1. Node / Postgres
+
+```bash
+cd server
+# DATABASE_URL already in .env
+npm run db:migrate:analytics   # or full: npm run db:migrate
+npm run dev
+```
+
+Confirm: `GET http://localhost:3001/api/analytics/status` → `"enabled": true`.
+
+API startup should log **Search Analytics: enabled** (requires `DATABASE_URL` + migration `003`):
+
+![Search Analytics enabled in backend](https://i.ibb.co/VcVTZqZW/image.png)
+
+### 2. Magento module
+
+Install/enable `Klizer_AiCommerceAssistant` (includes storefront AI + admin analytics):
+
+```bash
+# Magento root example
+php bin/magento module:enable Klizer_AiCommerceAssistant
+php bin/magento module:disable Klizer_AiCommerceAnalytics   # if old split module exists
+php bin/magento setup:upgrade
+php bin/magento cache:flush
+```
+
+**Stores → Configuration → Klizer → AI Commerce Assistant**
+
+| Setting | Example |
+| ------- | ------- |
+| Enable | Yes |
+| AI API Base URL | `http://127.0.0.1:3001` |
+| Search Analytics → Enable Analytics Menu | Yes |
+| Full Analytics Dashboard URL (optional) | `http://localhost:5173/analytics` |
+| Default Window (days) | `30` |
+
+Admin menu: **AI Commerce Assistant → Search ROI Dashboard**
+
+### 3. How metrics update
+
+| Event | When it is recorded |
+| ----- | ------------------- |
+| Search row | Each completed AI search (`/api/assistant/start` or `/message` → `search_products`) |
+| Impression | Product cards shown on results (React grid **or** Magento AI PLP) |
+| Click | Shopper opens a product card (React **or** Magento PLP → PDP) |
+
+Magento PLP tracks via proxy `POST /aicommerceassistant/ajax/track` → Node `/api/analytics/track`.
+
+Then refresh the Magento dashboard (or React `/analytics`).
+
+### Metrics
+
+| Metric | Meaning |
+| ------ | ------- |
+| Zero-result rate | Searches with no products |
+| Hybrid / semantic share | Share of searches with `source` hybrid or semantic |
+| CTR | Product card clicks ÷ impressions |
+| What / how / whom | Query text · Magento vs hybrid · guest/`customer_*` `userId` |
+
 ---
 
 ## npm scripts
@@ -273,6 +358,7 @@ This keeps apparel vs industrial / auto prompts and Magento attribute mapping al
 | `npm run db:migrate` | All SQL migrations |
 | `npm run db:migrate:embeddings` | Product embeddings schema |
 | `npm run db:migrate:context` | User context memory schema |
+| `npm run db:migrate:analytics` | Search analytics + CTR events |
 | `npm run sync:embeddings` | Crawl Magento → embed → Postgres |
 
 ---
@@ -282,28 +368,33 @@ This keeps apparel vs industrial / auto prompts and Magento attribute mapping al
 ```text
 AI-Commerce-Assistant/
 ├── src/                      # React assistant UI
-│   ├── api/                  # Client → /api/*
-│   ├── components/assistant/ # Chat, chips, product cards
+│   ├── api/                  # Client → /api/* (incl. analytics)
+│   ├── components/assistant/ # Chat, chips, product cards (+ CTR track)
 │   ├── hooks/                # useAssistant
-│   └── pages/                # AiAssistantPage
+│   └── pages/                # AiAssistantPage, AnalyticsPage
+├── magento/
+│   └── DEMO.md               # Magento admin + storefront demos
 ├── server/
 │   ├── .env.example
 │   ├── domain-config.json
-│   ├── sql/                  # Migrations
+│   ├── sql/                  # Migrations (incl. 003 analytics)
 │   └── src/
 │       ├── ai/               # engine, prompts (Ollama)
+│       ├── analytics/        # search + CTR persistence
 │       ├── config/           # env, domain config
 │       ├── context/          # memory, preferences
 │       ├── magento/          # GraphQL client, attributes, search
-│       ├── routes/           # assistant, semantic, context
+│       ├── routes/           # assistant, semantic, context, analytics
 │       ├── semantic/         # sync, recall, rerank
 │       ├── services/         # productSearch, contextReplay
 │       ├── session/          # in-memory chat sessions
 │       └── scripts/          # migrate, syncEmbeddings
 ├── DEMO.md                     # Node / app run screenshots
-├── magento/DEMO.md             # Magento admin + storefront demos
 └── HACKATHON_DOCUMENTATION.md  # Architecture & demo deep dive
 ```
+
+Magento module lives in the Magento install (not this repo copy):  
+`app/code/Klizer/AiCommerceAssistant` — storefront AI **and** Admin Search ROI (analytics merged; do not use a separate `AiCommerceAnalytics` module).
 
 Chat sessions are **in-memory** (lost on API restart). Product truth always comes from Magento.
 
@@ -311,7 +402,8 @@ Chat sessions are **in-memory** (lost on API restart). Product truth always come
 
 ## Demo ideas
 
-Screenshots: **[DEMO.md](./DEMO.md)** (Node)
+**20-min speaking guide:** [DEMO_SCRIPT_20MIN.md](./DEMO_SCRIPT_20MIN.md) (Semantic OFF vs ON)  
+Screenshots: [DEMO.md](./DEMO.md) (Node) · [magento/DEMO.md](./magento/DEMO.md) (Magento)
 
 | Scenario | Try |
 | -------- | --- |
@@ -334,7 +426,21 @@ Confirm `/api/health` shows Magento reachable (and semantic/context green when e
 | Empty / wrong products | Magento GraphQL URL, store code, auth token; `/api/health` Magento block |
 | Semantic always empty | `SEMANTIC_ENABLED`, `DATABASE_URL`, pgvector, `db:migrate`, `sync:embeddings` |
 | Context never offered | `CONTEXT_MEMORY_ENABLED`, migrations, similarity threshold, stable `userId` |
+| Analytics CTR stays 0% | Migrate analytics; click products from React or Magento AI PLP; refresh dashboard |
+| Magento analytics menu missing | Enable **Search Analytics** under Assistant config; ACL/menu after cache flush |
 | Wrong clarification style | Update `server/domain-config.json` for your vertical |
 
+---
 
+## Further reading
+
+- [DEMO.md](./DEMO.md) · [magento/DEMO.md](./magento/DEMO.md) — screenshots & videos
+- Magento module: `app/code/Klizer/AiCommerceAssistant` (storefront + Admin analytics)
+- [HACKATHON_DOCUMENTATION.md](./HACKATHON_DOCUMENTATION.md) — architecture deep dive
+
+### Demo screenshots — Search Analytics (backend)
+
+![Search Analytics enabled in backend](https://i.ibb.co/VcVTZqZW/image.png)
+
+*Backend console: Search Analytics enabled (Postgres / `db:migrate:analytics`)*
 
