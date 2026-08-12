@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { z } from 'zod'
+import { identityProofSchema, trustedUserIdFromBody } from '../auth/resolveRequestUser.js'
 import { pingContextDatabase } from '../context/db.js'
 import { contextRecommendationService } from '../context/services/ContextRecommendationService.js'
 import { isContextMemoryConfigured } from '../config/env.js'
@@ -8,6 +9,7 @@ const userIdSchema = z.string().trim().min(1).max(128)
 
 const saveSchema = z.object({
   userId: userIdSchema,
+  identity: identityProofSchema,
   sessionId: z.string().uuid(),
   originalQuery: z.string().trim().min(1),
   intent: z.string().optional(),
@@ -34,12 +36,26 @@ const saveSchema = z.object({
 
 const searchSchema = z.object({
   userId: userIdSchema,
+  identity: identityProofSchema,
   query: z.string().trim().min(1),
 })
 
 const clearSchema = z.object({
   userId: userIdSchema,
+  identity: identityProofSchema,
 })
+
+function requireTrustedUser(body: {
+  userId?: string
+  identity?: z.infer<typeof identityProofSchema>
+}): { userId: string } | { error: string; status: number } {
+  const trusted = trustedUserIdFromBody({
+    userId: body.userId,
+    identity: body.identity,
+  })
+  if ('error' in trusted) return { error: trusted.error, status: 401 }
+  return { userId: trusted.userId }
+}
 
 export const contextRouter = Router()
 
@@ -59,8 +75,17 @@ contextRouter.post('/save', async (req, res) => {
     return
   }
 
+  const trusted = requireTrustedUser(parsed.data)
+  if ('error' in trusted) {
+    res.status(trusted.status).json({ error: trusted.error })
+    return
+  }
+
   try {
-    const result = await contextRecommendationService.save(parsed.data)
+    const result = await contextRecommendationService.save({
+      ...parsed.data,
+      userId: trusted.userId,
+    })
     res.json({ ok: true, ...result })
   } catch (error) {
     console.error('[context/save]', error)
@@ -73,18 +98,35 @@ contextRouter.post('/save', async (req, res) => {
 /** Latest snapshot for a user (fast path). */
 contextRouter.get('/latest', async (req, res) => {
   const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : ''
-  if (!userId) {
+  const identity =
+    typeof req.query.cid === 'string' &&
+    typeof req.query.cid_exp === 'string' &&
+    typeof req.query.cid_sig === 'string'
+      ? {
+          customerId: req.query.cid,
+          exp: Number(req.query.cid_exp),
+          sig: req.query.cid_sig,
+        }
+      : undefined
+
+  if (!userId && !identity) {
     res.status(400).json({ error: 'userId query param is required' })
+    return
+  }
+
+  const trusted = trustedUserIdFromBody({ userId, identity })
+  if ('error' in trusted) {
+    res.status(401).json({ error: trusted.error })
     return
   }
 
   try {
     const started = Date.now()
-    const latest = await contextRecommendationService.getLatest(userId)
+    const latest = await contextRecommendationService.getLatest(trusted.userId)
     res.json({
       ok: true,
       elapsedMs: Date.now() - started,
-      ...latest,
+      ...(latest ?? {}),
     })
   } catch (error) {
     console.error('[context/latest]', error)
@@ -95,8 +137,7 @@ contextRouter.get('/latest', async (req, res) => {
 })
 
 /**
- * Semantic search against prior conversations.
- * Returns a reuse recommendation when similarity ≥ threshold (never auto-applies).
+ * Semantic match against this user's past searches (Continue previous?).
  */
 contextRouter.post('/search', async (req, res) => {
   const parsed = searchSchema.safeParse(req.body)
@@ -105,10 +146,16 @@ contextRouter.post('/search', async (req, res) => {
     return
   }
 
+  const trusted = requireTrustedUser(parsed.data)
+  if ('error' in trusted) {
+    res.status(trusted.status).json({ error: trusted.error })
+    return
+  }
+
   try {
     const started = Date.now()
     const recommendation = await contextRecommendationService.recommend(
-      parsed.data.userId,
+      trusted.userId,
       parsed.data.query,
     )
     res.json({
@@ -133,13 +180,21 @@ contextRouter.delete('/', async (req, res) => {
     (typeof req.query.userId === 'string' ? req.query.userId.trim() : '') ||
     (typeof req.body?.userId === 'string' ? req.body.userId.trim() : '')
 
-  if (!userId) {
+  const trusted = trustedUserIdFromBody({
+    userId,
+    identity: req.body?.identity,
+  })
+  if ('error' in trusted) {
+    res.status(401).json({ error: trusted.error })
+    return
+  }
+  if (!trusted.userId || trusted.userId === 'anonymous') {
     res.status(400).json({ error: 'userId is required' })
     return
   }
 
   try {
-    await contextRecommendationService.clearUser(userId)
+    await contextRecommendationService.clearUser(trusted.userId)
     res.json({ ok: true, cleared: true })
   } catch (error) {
     console.error('[context/delete]', error)
@@ -157,8 +212,14 @@ contextRouter.post('/clear', async (req, res) => {
     return
   }
 
+  const trusted = requireTrustedUser(parsed.data)
+  if ('error' in trusted) {
+    res.status(trusted.status).json({ error: trusted.error })
+    return
+  }
+
   try {
-    await contextRecommendationService.clearUser(parsed.data.userId)
+    await contextRecommendationService.clearUser(trusted.userId)
     res.json({ ok: true, cleared: true })
   } catch (error) {
     console.error('[context/clear]', error)
@@ -172,6 +233,7 @@ contextRouter.post('/clear', async (req, res) => {
 contextRouter.post('/continue', async (req, res) => {
   const schema = z.object({
     userId: userIdSchema,
+    identity: identityProofSchema,
     historyId: z.string().uuid(),
   })
   const parsed = schema.safeParse(req.body)
@@ -180,9 +242,15 @@ contextRouter.post('/continue', async (req, res) => {
     return
   }
 
+  const trusted = requireTrustedUser(parsed.data)
+  if ('error' in trusted) {
+    res.status(trusted.status).json({ error: trusted.error })
+    return
+  }
+
   try {
     await contextRecommendationService.continuePrevious(parsed.data.historyId)
-    res.json({ ok: true })
+    res.json({ ok: true, userId: trusted.userId })
   } catch (error) {
     console.error('[context/continue]', error)
     res.status(502).json({

@@ -6,6 +6,8 @@ import {
   listRecentSearches,
   trackProductEvents,
 } from '../analytics/index.js'
+import { identityProofSchema, trustedUserIdFromBody } from '../auth/resolveRequestUser.js'
+import { isCustomerIdentityConfigured } from '../auth/customerIdentity.js'
 
 export const analyticsRouter = Router()
 
@@ -13,6 +15,7 @@ analyticsRouter.get('/status', (_req, res) => {
   res.json({
     ok: true,
     enabled: isAnalyticsConfigured(),
+    customerIdentityHmac: isCustomerIdentityConfigured(),
     message: isAnalyticsConfigured()
       ? 'Analytics uses DATABASE_URL (Postgres). Run: npm run db:migrate:analytics'
       : 'Set DATABASE_URL in server/.env to enable analytics',
@@ -72,6 +75,7 @@ analyticsRouter.get('/searches', async (req, res) => {
 
 const trackSchema = z.object({
   userId: z.string().trim().min(1).max(128),
+  identity: identityProofSchema,
   sessionId: z.string().uuid().optional(),
   searchId: z.string().uuid().optional(),
   source: z.string().optional(),
@@ -101,11 +105,19 @@ analyticsRouter.post('/track', async (req, res) => {
     res.status(400).json({ ok: false, error: 'invalid_payload' })
     return
   }
-  const { userId, sessionId, searchId, source, events } = parsed.data
+  const trusted = trustedUserIdFromBody({
+    userId: parsed.data.userId,
+    identity: parsed.data.identity,
+  })
+  if ('error' in trusted) {
+    res.status(401).json({ ok: false, error: trusted.error })
+    return
+  }
+  const { sessionId, searchId, source, events } = parsed.data
   try {
     const inserted = await trackProductEvents(
       events.map((e) => ({
-        userId,
+        userId: trusted.userId,
         sessionId,
         searchId,
         source,

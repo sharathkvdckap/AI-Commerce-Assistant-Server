@@ -10,6 +10,7 @@ import {
   isMagentoConfigured,
   isSemanticConfigured,
 } from './config/env.js'
+import { isCustomerIdentityConfigured } from './auth/customerIdentity.js'
 import {
   getDomainConfig,
   getDomainConfigPath,
@@ -97,6 +98,10 @@ app.get('/api/health', async (_req, res) => {
       enabled: isAnalyticsConfigured(),
       note: 'Zero-result, hybrid lift, CTR — requires DATABASE_URL + db:migrate:analytics',
     },
+    customerIdentity: {
+      hmacRequired: isCustomerIdentityConfigured(),
+      note: 'When hmacRequired, Magento must send cid_exp + cid_sig with customer_id',
+    },
     domainConfig: (() => {
       const domain = getDomainConfig()
       return {
@@ -149,5 +154,8 @@ app.listen(config.port, () => {
   )
   console.log(
     `Analytics: ${isAnalyticsConfigured() ? 'enabled' : 'disabled'}`,
+  )
+  console.log(
+    `Customer identity HMAC: ${isCustomerIdentityConfigured() ? 'enabled' : 'off (dev unsigned OK)'}`,
   )
 })

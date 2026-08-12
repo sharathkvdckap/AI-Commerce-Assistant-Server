@@ -1,4 +1,5 @@
 import type { ContextSearchResponse } from '@/types/context'
+import { getIdentityRequestFields } from '@/lib/userId'
 
 async function requestJson<T>(
   url: string,
@@ -18,22 +19,36 @@ async function requestJson<T>(
 }
 
 export function searchSimilarContext(userId: string, query: string) {
+  const identity = getIdentityRequestFields()
   return requestJson<ContextSearchResponse>('/api/context/search', {
     method: 'POST',
-    body: JSON.stringify({ userId, query }),
+    body: JSON.stringify({
+      userId: userId || identity.userId,
+      identity: identity.identity,
+      query,
+    }),
   })
 }
 
 export function continueContext(userId: string, historyId: string) {
+  const identity = getIdentityRequestFields()
   return requestJson<{ ok: boolean }>('/api/context/continue', {
     method: 'POST',
-    body: JSON.stringify({ userId, historyId }),
+    body: JSON.stringify({
+      userId: userId || identity.userId,
+      identity: identity.identity,
+      historyId,
+    }),
   })
 }
 
 export function clearContext(userId: string) {
+  const identity = getIdentityRequestFields()
   return requestJson<{ ok: boolean }>('/api/context/clear', {
     method: 'POST',
-    body: JSON.stringify({ userId }),
+    body: JSON.stringify({
+      userId: userId || identity.userId,
+      identity: identity.identity,
+    }),
   })
 }

@@ -163,6 +163,9 @@ Copy from `server/.env.example`. Important keys:
 | `CONTEXT_MEMORY_ENABLED` | `true` | Save / reuse prior searches |
 | `CONTEXT_SIMILARITY_THRESHOLD` | `0.80` | Offer “continue previous search” |
 | `DOMAIN_CONFIG_PATH` | `./domain-config.json` | Merchant vertical config |
+| `CUSTOMER_ID_HMAC_SECRET` | _(empty)_ | Shared Magento↔Node HMAC; when set, require signed `customer_id` |
+| `CUSTOMER_ID_TOKEN_TTL_SEC` | `3600` | Suggested Magento token lifetime |
+| `CUSTOMER_ID_MAX_FUTURE_SKEW_SEC` | `7200` | Reject `exp` farther than this in the future |
 
 ---
 
@@ -196,6 +199,56 @@ EMBEDDING_DIMS=1024
 When `CONTEXT_MEMORY_ENABLED=true`, completed searches can be saved for a `userId`. A later similar query can offer **Continue previous search** vs **New search**.
 
 Requires Postgres + `npm run db:migrate:context` (or full `db:migrate`).
+
+**Who is `userId`?**
+
+| Shopper | `userId` format | How |
+| ------- | --------------- | --- |
+| Guest | `guest_{uuid}` | Stored in browser `localStorage` |
+| Magento logged-in | `customer_{id}` | Magento redirect with signed proof (see below) |
+
+### Signed Magento redirect (recommended)
+
+Node and Magento share `CUSTOMER_ID_HMAC_SECRET`. Magento signs:
+
+```text
+payload = v1|{customerId}|{exp}
+sig     = HMAC-SHA256-hex(secret, payload)
+```
+
+Redirect URL:
+
+```text
+/ai-assistant?q=shorts&customer_id=42&cid_exp=<unix>&cid_sig=<hex>
+```
+
+The React app stores the proof and sends `{ userId, identity: { customerId, exp, sig } }` on assistant / context / analytics calls. When the secret is set, bare `customer_*` without a valid proof gets **401**.
+
+Generate a local test URL:
+
+```bash
+cd server
+# set CUSTOMER_ID_HMAC_SECRET in .env first
+npm run sign:customer -- 42
+```
+
+Magento PHP (same secret as Node):
+
+```php
+$customerId = (string) $customer->getId();
+$exp = time() + 3600;
+$payload = "v1|{$customerId}|{$exp}";
+$sig = hash_hmac('sha256', $payload, $hmacSecret);
+$query = http_build_query([
+    'q' => $searchQuery,
+    'customer_id' => $customerId,
+    'cid_exp' => $exp,
+    'cid_sig' => $sig,
+]);
+// redirect to assistant base + '?' . $query
+```
+
+Dev-only (secret empty): unsigned `?customer_id=42` is still accepted with a server warning. Do not use that in production.
 
 ---
 

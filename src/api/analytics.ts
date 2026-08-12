@@ -1,4 +1,4 @@
-import { getOrCreateUserId } from '@/lib/userId'
+import { getIdentityRequestFields, getOrCreateUserId } from '@/lib/userId'
 
 export interface AnalyticsSummary {
   windowDays: number
@@ -70,6 +70,7 @@ export async function trackProductEvents(input: {
 }): Promise<void> {
   if (!input.events.length) return
   await postJson('/api/analytics/track', {
+    ...getIdentityRequestFields(),
     userId: getOrCreateUserId(),
     sessionId: input.sessionId ?? undefined,
     searchId: input.searchId ?? undefined,
