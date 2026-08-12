@@ -202,10 +202,6 @@ export function mergeAndRerank(input: {
 
   const ranked = [...bySku.values()].sort((a, b) => b._score - a._score)
 
-  /**
-   * Hybrid/mixed: semantic % first, then Magento reasons.
-   * Magento-only (no semantic score): Magento reasons only.
-   */
   const strip = (p: RankedProduct): CatalogProduct => {
     const {
       _score: _s,
@@ -215,26 +211,6 @@ export function mergeAndRerank(input: {
       _magentoRank: _r,
       ...card
     } = p
-
-    const rawReasons = Array.isArray(card.reasons) ? card.reasons : []
-    const semanticReasons = rawReasons.filter((r) =>
-      /^Semantic match/i.test(r),
-    )
-    const magentoReasons = rawReasons.filter(
-      (r) => !/^Semantic match/i.test(r),
-    )
-
-    if (p._fromSemantic && p._semanticScore > 0) {
-      const pct = Math.round(p._semanticScore * 100)
-      const semanticLine = semanticReasons[0] ?? `Semantic match ~${pct}%`
-      card.reasons = [semanticLine, ...magentoReasons].slice(0, 4)
-    } else {
-      // Magento-only hits must not keep a stale semantic percentage.
-      card.reasons = (
-        magentoReasons.length > 0 ? magentoReasons : rawReasons
-      ).slice(0, 4)
-    }
-
     return card
   }
 
