@@ -1,0 +1,14 @@
+id,topic,sku,question,answer
+ret-01,returns,,What is the return window?,Unused items can be returned within 30 days in original packaging. Sale and final-sale items cannot be returned.
+ret-02,returns,,Who pays return shipping?,The shopper pays return shipping unless the item arrived damaged or incorrect. Contact support for a prepaid label in those cases.
+ship-01,shipping,,How long does shipping take?,Standard shipping is 3–5 business days. Orders over $50 ship free within the contiguous US.
+ship-02,shipping,,Do you ship internationally?,Yes. International orders typically arrive in 7–14 business days and may incur duties at delivery.
+size-mh01,sizing,MH01,Does the Chaz Kangaroo Hoodie run large?,True to size. Size up only if you plan to layer it over another hoodie.
+size-wh01,sizing,WH01,How does the Circe Hooded Sweatshirt fit?,Regular fit through the body. The hood is roomy; stay with your usual size.
+size-pants,sizing,,How should I choose pant size?,Use the size chart on the product page. If you are between sizes, size up for joggers and stay true to size for chinos.
+care-01,care,,How do I wash hoodies and tees?,Machine wash cold with like colors. Tumble dry low. Do not bleach graphic prints.
+compat-nema,compatibility,,Do shaft collars fit NEMA 56C motors?,Yes. Use collar C-56C with NEMA 56C face-mount motors. Confirm shaft diameter before ordering.
+compat-bearing,compatibility,,What bearing fits a grinding-noise motor shaft?,If the shaft is 20mm, use a 20mm bore sealed ball bearing. Replace the shaft collar if it is scored.
+warranty-01,warranty,,What is the product warranty?,Apparel has a 90-day workmanship warranty. Fitness equipment and industrial parts have a 1-year warranty against manufacturing defects.
+faq-gift,gifts,,Can I add a gift message?,Yes. Add the message in checkout notes. Gift receipts omit prices.
+faq-stock,stock,,What if an item is out of stock?,The assistant only shows live Magento availability. If a size is missing, ask for a close alternative in the same category.

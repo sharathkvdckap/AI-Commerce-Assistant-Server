@@ -160,6 +160,11 @@ Copy from `server/.env.example`. Important keys:
 | `SEMANTIC_TOP_K` | `12` | Vector recall depth |
 | `SEMANTIC_MIN_SCORE` | `0.35` | Enrich threshold |
 | `SEMANTIC_FALLBACK_MIN_SCORE` | `0.55` | Fallback when Magento is weak |
+| `SHEET_RAG_ENABLED` | `true` | Merchant sheet / CSV knowledge RAG |
+| `SHEET_CSV_URL` | *(empty)* | Published Google Sheet CSV URL |
+| `SHEET_CSV_PATH` | `./knowledge/sample.csv` | Local CSV fallback |
+| `SHEET_RAG_TOP_K` | `4` | Knowledge snippets per turn |
+| `SHEET_RAG_MIN_SCORE` | `0.45` | Knowledge similarity threshold |
 | `CONTEXT_MEMORY_ENABLED` | `true` | Save / reuse prior searches |
 | `CONTEXT_SIMILARITY_THRESHOLD` | `0.80` | Offer “continue previous search” |
 | `DOMAIN_CONFIG_PATH` | `./domain-config.json` | Merchant vertical config |
@@ -191,6 +196,30 @@ EMBEDDING_DIMS=1024
 | ---- | -------------- | --------------------- |
 | `SEMANTIC_ENABLED=true` | Magento + pgvector hybrid | **Yes** |
 | `SEMANTIC_ENABLED=false` | Magento GraphQL only | No |
+
+---
+
+## Sheet RAG (Google Sheet / CSV)
+
+Merchant FAQs, sizing, returns, and compatibility live in a **Google Sheet or CSV** — not Magento file uploads. Magento stays the product catalog.
+
+```bash
+cd server
+npm run db:migrate:knowledge   # or full: npm run db:migrate
+ollama pull bge-m3
+npm run sync:sheets
+```
+
+```env
+SHEET_RAG_ENABLED=true
+# Optional live sheet (File → Share → Publish to web, or export CSV URL):
+# SHEET_CSV_URL=https://docs.google.com/spreadsheets/d/<id>/export?format=csv&gid=0
+# Defaults to server/knowledge/sample.csv
+SHEET_RAG_TOP_K=4
+SHEET_RAG_MIN_SCORE=0.45
+```
+
+Sheet columns: `id`, `topic`, `sku` (optional Magento SKU), `question`, `answer`. After editing the sheet, re-run `npm run sync:sheets` (or `POST /api/knowledge/sync`).
 
 ---
 
@@ -304,6 +333,9 @@ API startup should log analytics enabled:
 | `GET` | `/api/semantic/status` | Index / config status |
 | `POST` | `/api/semantic/sync` | Magento → embeddings |
 | `POST` | `/api/semantic/search` | `{ "query": "…" }` vector search |
+| `GET` | `/api/knowledge/status` | Sheet RAG index / config |
+| `POST` | `/api/knowledge/sync` | Sheet / CSV → embeddings |
+| `POST` | `/api/knowledge/search` | `{ "query": "…" }` knowledge retrieve |
 | `GET` | `/api/context/status` | Context memory status |
 | `POST` | `/api/context/save` | Persist search context |
 | `GET` | `/api/context/latest` | Latest for user |
@@ -340,7 +372,9 @@ API startup should log analytics enabled:
 | `npm run db:migrate:embeddings` | Product embeddings schema |
 | `npm run db:migrate:context` | User context memory schema |
 | `npm run db:migrate:analytics` | Search analytics + CTR events |
+| `npm run db:migrate:knowledge` | Sheet knowledge (`sheet_chunks`) schema |
 | `npm run sync:embeddings` | Crawl Magento → embed → Postgres |
+| `npm run sync:sheets` | Google Sheet / CSV → embed → Postgres |
 
 ---
 
@@ -352,12 +386,14 @@ AI-Commerce-Assistant/
 ├── server/
 │   ├── .env.example
 │   ├── domain-config.json
-│   ├── sql/                  # Migrations (incl. 003 analytics)
+│   ├── sql/                  # Migrations (incl. 004 sheet knowledge)
+│   ├── knowledge/            # Sample merchant CSV for sheet RAG
 │   └── src/
 │       ├── ai/
 │       ├── analytics/
 │       ├── config/
 │       ├── context/
+│       ├── knowledge/        # Sheet / CSV RAG
 │       ├── magento/          # GraphQL client (Node)
 │       ├── routes/
 │       ├── semantic/

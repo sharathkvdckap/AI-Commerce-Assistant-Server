@@ -20,9 +20,17 @@ function envFloat(value: string | undefined, fallback: number): number {
   return Number.isFinite(n) ? n : fallback
 }
 
+const serverRoot = path.resolve(__dirname, '../..')
+
 const databaseUrl =
   process.env.DATABASE_URL ??
   'postgresql://postgres:postgres@127.0.0.1:5432/ai_commerce_assistant'
+
+function resolveSheetCsvPath(): string {
+  const raw = (process.env.SHEET_CSV_PATH ?? '').trim()
+  if (!raw) return path.join(serverRoot, 'knowledge/sample.csv')
+  return path.isAbsolute(raw) ? raw : path.resolve(serverRoot, raw)
+}
 
 export const config = {
   port: envInt(process.env.PORT, 3001),
@@ -57,6 +65,18 @@ export const config = {
       process.env.CONTEXT_SIMILARITY_THRESHOLD,
       0.8,
     ),
+  },
+  /**
+   * Merchant knowledge RAG (Google Sheet / CSV → pgvector).
+   * Magento stays catalog truth; sheets hold FAQs, sizing, policies, specs.
+   */
+  sheetRag: {
+    enabled: envBool(process.env.SHEET_RAG_ENABLED, false),
+    csvUrl: (process.env.SHEET_CSV_URL ?? '').trim(),
+    csvPath: resolveSheetCsvPath(),
+    topK: envInt(process.env.SHEET_RAG_TOP_K, 4),
+    minScore: envFloat(process.env.SHEET_RAG_MIN_SCORE, 0.45),
+    syncConcurrency: envInt(process.env.SHEET_RAG_SYNC_CONCURRENCY, 4),
   },
   /**
    * Merchant vertical config (domains, clarify steps, attribute maps).
@@ -96,4 +116,12 @@ export function isContextMemoryConfigured(): boolean {
 
 export function isSemanticConfigured(): boolean {
   return config.semantic.enabled && isDatabaseConfigured()
+}
+
+export function isSheetRagConfigured(): boolean {
+  return (
+    config.sheetRag.enabled &&
+    isDatabaseConfigured() &&
+    Boolean(config.sheetRag.csvUrl || config.sheetRag.csvPath)
+  )
 }

@@ -17,6 +17,12 @@ import {
   getDomainConfig,
   isClarifyStepNeeded,
 } from '../config/domainConfig.js'
+import {
+  attachKnowledgeMessage,
+  formatKnowledgePrompt,
+  retrieveSheetChunksSafe,
+  type KnowledgeHit,
+} from '../knowledge/index.js'
 import { buildSystemPrompt } from './prompt.js'
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434'
@@ -874,11 +880,27 @@ async function fallbackQuestion(
   return forceSearch(filters)
 }
 
-function forceSearch(filters: ProductFilters): AiResponse {
+function forceSearch(
+  filters: ProductFilters,
+  knowledge: KnowledgeHit[] = [],
+): AiResponse {
   return {
     action: 'search_products',
-    message: 'Thanks — searching the Magento catalog with your requirements.',
+    message: attachKnowledgeMessage(
+      'Thanks — searching the Magento catalog with your requirements.',
+      knowledge,
+    ),
     filters,
+  }
+}
+
+function withKnowledge(
+  ai: AiResponse,
+  knowledge: KnowledgeHit[],
+): AiResponse {
+  return {
+    ...ai,
+    message: attachKnowledgeMessage(ai.message, knowledge),
   }
 }
 
@@ -888,6 +910,7 @@ function buildUserPrompt(input: {
   knownFilters: ProductFilters
   userTurnCount: number
   domain: QueryDomain
+  knowledge: KnowledgeHit[]
 }): string {
   const clarifying = clarifyingCount(input.userTurnCount)
   return [
@@ -903,14 +926,18 @@ function buildUserPrompt(input: {
     `If the customer gave a SKU or a specific product name, return search immediately (no clarification).`,
     `If clarifying questions answered >= ${MAX_CLARIFYING_QUESTIONS}, return search.`,
     `Do not ask about details already present in known filters or conversation.`,
+    `If merchant knowledge snippets were provided and they answer the question, put that answer in "message".`,
     `Return JSON only using ONE of these shapes:`,
-    `clarification: {"type":"clarification","question":"<one dynamic question>","options":["A","B","C"]}`,
-    `search: {"type":"search","intent":"...","confidence":0.9,"searchCriteria":{"keywords":[],"application":"","equipment":"","industry":"","features":[],"dimensions":{},"compatibility":{},"quantity":null,"budget":null}}`,
+    `clarification: {"type":"clarification","message":"<optional knowledge answer>","question":"<one dynamic question>","options":["A","B","C"]}`,
+    `search: {"type":"search","intent":"...","confidence":0.9,"message":"<optional knowledge answer>","searchCriteria":{"keywords":[],"application":"","equipment":"","industry":"","features":[],"dimensions":{},"compatibility":{},"quantity":null,"budget":null}}`,
     `For clarification, options must fit this request (never Yes/No, never unrelated domain choices).`,
     input.domain === 'industrial'
       ? `This request is industrial/parts. Options must be part or motor choices (e.g. Shaft / shaft collar, Bearing, Motor assembly, Coupling / seal, AC induction motor) — never apparel, color fashion, or fitness chips.`
       : '',
     `Never invent product SKUs or Magento catalog data.`,
+    input.knowledge.length > 0
+      ? `Merchant knowledge hits: ${input.knowledge.length}. Prefer these facts in "message" when relevant.`
+      : '',
   ]
     .filter(Boolean)
     .join('\n')
@@ -968,8 +995,13 @@ export async function runAssistantTurn(input: {
   )
   seededFilters.domain = domain
 
+  const knowledgeQuery = [input.query, String(seededFilters.query ?? '')]
+    .filter(Boolean)
+    .join(' ')
+  const knowledge = await retrieveSheetChunksSafe(knowledgeQuery)
+
   if (isReadyToSearch(seededFilters, userTurnCount)) {
-    return forceSearch(seededFilters)
+    return forceSearch(seededFilters, knowledge)
   }
 
   const llm = new ChatOllama({
@@ -982,7 +1014,9 @@ export async function runAssistantTurn(input: {
   try {
     const result = await llm.invoke([
       new SystemMessage(
-        buildSystemPrompt(buildMerchantSystemAppendix(getDomainConfig())),
+        buildSystemPrompt(
+          `${buildMerchantSystemAppendix(getDomainConfig())}${formatKnowledgePrompt(knowledge)}`,
+        ),
       ),
       new HumanMessage(
         buildUserPrompt({
@@ -990,6 +1024,7 @@ export async function runAssistantTurn(input: {
           knownFilters: seededFilters,
           userTurnCount,
           domain,
+          knowledge,
         }),
       ),
     ])
@@ -1006,7 +1041,10 @@ export async function runAssistantTurn(input: {
         '[ai] Model JSON failed schema validation:',
         parsedResult.error.issues,
       )
-      return fallbackQuestion(seededFilters, userTurnCount)
+      return withKnowledge(
+        await fallbackQuestion(seededFilters, userTurnCount),
+        knowledge,
+      )
     }
     const validated = parsedResult.data
     const mergedFilters = mergeFilters(
@@ -1018,7 +1056,7 @@ export async function runAssistantTurn(input: {
     if (seededFilters.query) mergedFilters.query = seededFilters.query
 
     if (isReadyToSearch(mergedFilters, userTurnCount)) {
-      return forceSearch(mergedFilters)
+      return forceSearch(mergedFilters, knowledge)
     }
 
     if (validated.action === 'search_products') {
@@ -1029,15 +1067,21 @@ export async function runAssistantTurn(input: {
           mergedFilters.category ||
           mergedFilters.motor_type)
       ) {
-        return { ...validated, filters: mergedFilters }
+        return withKnowledge(
+          { ...validated, filters: mergedFilters },
+          knowledge,
+        )
       }
       if (
         mergedFilters.category &&
         (mergedFilters.color || mergedFilters.gender)
       ) {
-        return forceSearch(mergedFilters)
+        return forceSearch(mergedFilters, knowledge)
       }
-      return fallbackQuestion(mergedFilters, userTurnCount)
+      return withKnowledge(
+        await fallbackQuestion(mergedFilters, userTurnCount),
+        knowledge,
+      )
     }
 
     // Block irrelevant apparel questions for industrial domain
@@ -1045,7 +1089,10 @@ export async function runAssistantTurn(input: {
       domain === 'industrial' &&
       isApparelQuestion(validated.question)
     ) {
-      return fallbackQuestion(mergedFilters, userTurnCount)
+      return withKnowledge(
+        await fallbackQuestion(mergedFilters, userTurnCount),
+        knowledge,
+      )
     }
 
     // Don't repeat a question the assistant already asked — search instead
@@ -1059,7 +1106,7 @@ export async function runAssistantTurn(input: {
         lastAssistant.content.trim().toLowerCase() ===
           (validated.message ?? '').trim().toLowerCase())
     ) {
-      return forceSearch(mergedFilters)
+      return forceSearch(mergedFilters, knowledge)
     }
 
     // If color was already answered, never re-ask about color
@@ -1067,7 +1114,10 @@ export async function runAssistantTurn(input: {
       mergedFilters.color &&
       (q.includes('color') || q.includes('colour'))
     ) {
-      return fallbackQuestion(mergedFilters, userTurnCount)
+      return withKnowledge(
+        await fallbackQuestion(mergedFilters, userTurnCount),
+        knowledge,
+      )
     }
 
     // Replace empty/junk or wrong-domain options with domain-aware chips
@@ -1085,17 +1135,23 @@ export async function runAssistantTurn(input: {
               'Narrow it down more',
               'Not sure',
             ]
-      return {
-        ...validated,
-        options: defaults,
-        filters: mergedFilters,
-      }
+      return withKnowledge(
+        {
+          ...validated,
+          options: defaults,
+          filters: mergedFilters,
+        },
+        knowledge,
+      )
     }
 
-    return { ...validated, filters: mergedFilters }
+    return withKnowledge({ ...validated, filters: mergedFilters }, knowledge)
   } catch (error) {
     console.warn('[ai] Falling back to domain heuristic:', error)
-    return fallbackQuestion(seededFilters, userTurnCount)
+    return withKnowledge(
+      await fallbackQuestion(seededFilters, userTurnCount),
+      knowledge,
+    )
   }
 }
 

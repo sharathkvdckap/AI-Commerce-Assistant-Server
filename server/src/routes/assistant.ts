@@ -12,6 +12,10 @@ import {
 } from '../services/contextReplay.js'
 import { searchProducts } from '../services/productSearch.js'
 import {
+  attachKnowledgeMessage,
+  retrieveSheetChunksSafe,
+} from '../knowledge/index.js'
+import {
   createSession,
   getSession,
   saveSession,
@@ -268,10 +272,16 @@ assistantRouter.post('/start', async (req, res) => {
   try {
     const direct = await findDirectSkuOrNameMatch(query)
     if (direct && direct.products.length > 0) {
-      const message =
+      const knowledge = await retrieveSheetChunksSafe(query, {
+        skus: direct.products
+          .map((p) => p.sku)
+          .filter((sku): sku is string => Boolean(sku)),
+      })
+      const baseMessage =
         direct.alternatives.length > 0
           ? 'Found a matching product in Magento. Here it is, plus related alternatives.'
           : 'Found a matching product in Magento.'
+      const message = attachKnowledgeMessage(baseMessage, knowledge)
       session.messages.push({ role: 'assistant', content: message })
       session.status = 'completed'
       saveSession(session)

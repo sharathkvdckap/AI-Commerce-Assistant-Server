@@ -10,7 +10,9 @@
     "db:migrate:embeddings": "tsx src/scripts/migrate.ts 001_product_embeddings",
     "db:migrate:context": "tsx src/scripts/migrate.ts 002_user_context_memory",
     "db:migrate:analytics": "tsx src/scripts/migrate.ts 003_search_analytics",
+    "db:migrate:knowledge": "tsx src/scripts/migrate.ts 004_sheet_knowledge",
     "sync:embeddings": "tsx src/scripts/syncEmbeddings.ts",
+    "sync:sheets": "tsx src/scripts/syncSheets.ts",
     "sign:customer": "tsx src/scripts/signCustomerIdentity.ts"
   },
   "dependencies": {

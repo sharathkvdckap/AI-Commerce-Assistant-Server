@@ -9,6 +9,7 @@ import {
   isContextMemoryConfigured,
   isMagentoConfigured,
   isSemanticConfigured,
+  isSheetRagConfigured,
 } from './config/env.js'
 import { isCustomerIdentityConfigured } from './auth/customerIdentity.js'
 import {
@@ -16,11 +17,13 @@ import {
   getDomainConfigPath,
 } from './config/domainConfig.js'
 import { pingContextDatabase, pingSemanticDatabase } from './context/db.js'
+import { pingSheetKnowledge } from './knowledge/index.js'
 import { listMagentoFilterableAttributes } from './magento/attributes.js'
 import { magentoGraphql } from './magento/client.js'
 import { assistantRouter } from './routes/assistant.js'
 import { analyticsRouter } from './routes/analytics.js'
 import { contextRouter } from './routes/context.js'
+import { knowledgeRouter } from './routes/knowledge.js'
 import { semanticRouter } from './routes/semantic.js'
 import { isAnalyticsConfigured } from './analytics/index.js'
 
@@ -59,6 +62,10 @@ app.get('/api/health', async (_req, res) => {
     ? await pingSemanticDatabase()
     : { ok: false, error: 'not_configured' }
 
+  const sheetRag = isSheetRagConfigured()
+    ? await pingSheetKnowledge()
+    : { ok: false, error: 'not_configured' }
+
   let magentoAttributes:
     | Array<{ code: string; optionCount: number; sampleLabels: string[] }>
     | { error: string }
@@ -93,6 +100,16 @@ app.get('/api/health', async (_req, res) => {
       minScore: config.semantic.minScore,
       fallbackMinScore: config.semantic.fallbackMinScore,
       ...semantic,
+    },
+    sheetRag: {
+      enabled: isSheetRagConfigured(),
+      embeddingModel: config.context.embeddingModel,
+      topK: config.sheetRag.topK,
+      minScore: config.sheetRag.minScore,
+      csvUrl: config.sheetRag.csvUrl || null,
+      csvPath: config.sheetRag.csvPath,
+      note: 'Merchant FAQs/sizing/policies from Google Sheet or CSV — not Magento PDFs',
+      ...sheetRag,
     },
     analytics: {
       enabled: isAnalyticsConfigured(),
@@ -133,6 +150,7 @@ app.get('/api/magento/attributes', async (_req, res) => {
 app.use('/api/assistant', assistantRouter)
 app.use('/api/context', contextRouter)
 app.use('/api/semantic', semanticRouter)
+app.use('/api/knowledge', knowledgeRouter)
 app.use('/api/analytics', analyticsRouter)
 
 app.listen(config.port, () => {
@@ -151,6 +169,9 @@ app.listen(config.port, () => {
   )
   console.log(
     `Semantic search: ${isSemanticConfigured() ? 'enabled' : 'disabled'}`,
+  )
+  console.log(
+    `Sheet RAG: ${isSheetRagConfigured() ? 'enabled' : 'disabled'}`,
   )
   console.log(
     `Analytics: ${isAnalyticsConfigured() ? 'enabled' : 'disabled'}`,
