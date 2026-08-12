@@ -63,6 +63,17 @@ export const config = {
    * Default: server/domain-config.json — override with DOMAIN_CONFIG_PATH.
    */
   domainConfigPath: process.env.DOMAIN_CONFIG_PATH?.trim() || '',
+  /**
+   * HMAC secret shared with Magento for signed customer_id redirects.
+   * When set, bare customer_* userIds are rejected without a valid proof.
+   */
+  identity: {
+    hmacSecret: (process.env.CUSTOMER_ID_HMAC_SECRET ?? '').trim(),
+    /** Max token lifetime Magento may issue (seconds). */
+    tokenTtlSec: envInt(process.env.CUSTOMER_ID_TOKEN_TTL_SEC, 3600),
+    /** Reject exp more than this many seconds in the future. */
+    maxFutureSkewSec: envInt(process.env.CUSTOMER_ID_MAX_FUTURE_SKEW_SEC, 7200),
+  },
 }
 
 export function isMagentoConfigured(): boolean {

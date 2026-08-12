@@ -4,6 +4,7 @@ import type {
   ProductFilters,
   SearchProductsResponse,
 } from '@/types/assistant'
+import { getIdentityRequestFields } from '@/lib/userId'
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -28,9 +29,11 @@ export function startAssistant(
     reuseHistoryId?: string
   },
 ) {
+  const identity = getIdentityRequestFields()
   return postJson<AssistantApiResponse>('/api/assistant/start', {
     query,
-    userId: options?.userId,
+    ...identity,
+    userId: options?.userId ?? identity.userId,
     reuseFilters: options?.reuseFilters,
     reuseHistoryId: options?.reuseHistoryId,
   })
@@ -41,10 +44,12 @@ export function sendAssistantMessage(
   answer: string,
   options?: { userId?: string },
 ) {
+  const identity = getIdentityRequestFields()
   return postJson<AssistantApiResponse>('/api/assistant/message', {
     sessionId,
     answer,
-    userId: options?.userId,
+    ...identity,
+    userId: options?.userId ?? identity.userId,
   })
 }
 

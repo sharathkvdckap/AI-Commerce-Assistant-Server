@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { runAssistantTurn, type AiResponse, type ProductFilters } from '../ai/engine.js'
 import { trackSearchAnalytics } from '../analytics/index.js'
+import { identityProofSchema, trustedUserIdFromBody } from '../auth/resolveRequestUser.js'
 import { isContextMemoryConfigured } from '../config/env.js'
 import { contextRecommendationService } from '../context/services/ContextRecommendationService.js'
 import { findDirectSkuOrNameMatch } from '../magento/search.js'
@@ -25,6 +26,7 @@ const filtersRecord = z.record(
 const startSchema = z.object({
   query: z.string().trim().min(1),
   userId: z.string().trim().min(1).max(128).optional(),
+  identity: identityProofSchema,
   /** When customer chooses Continue Previous Search — seed known filters. */
   reuseFilters: filtersRecord.optional(),
   reuseHistoryId: z.string().uuid().optional(),
@@ -34,6 +36,7 @@ const messageSchema = z.object({
   sessionId: z.string().uuid(),
   answer: z.string().trim().min(1),
   userId: z.string().trim().min(1).max(128).optional(),
+  identity: identityProofSchema,
 })
 
 const searchSchema = z
@@ -179,7 +182,23 @@ assistantRouter.post('/start', async (req, res) => {
     return
   }
 
-  const { query, userId, reuseFilters, reuseHistoryId } = parsed.data
+  const trusted = trustedUserIdFromBody({
+    userId: parsed.data.userId,
+    identity: parsed.data.identity,
+  })
+  if ('error' in trusted) {
+    res.status(401).json({ error: trusted.error })
+    return
+  }
+  const userId = trusted.userId
+  console.log('[assistant/start] identity', {
+    claimedUserId: parsed.data.userId ?? null,
+    trustedUserId: userId,
+    identityAttached: Boolean(parsed.data.identity),
+    identityCustomerId: parsed.data.identity?.customerId ?? null,
+  })
+
+  const { query, reuseFilters, reuseHistoryId } = parsed.data
   const seeded: ProductFilters = {
     ...(reuseFilters ?? {}),
     query,
@@ -198,7 +217,7 @@ assistantRouter.post('/start', async (req, res) => {
       .catch(() => undefined)
 
     try {
-      const replayed = await replayPreviousSearch(reuseHistoryId, userId ?? '')
+      const replayed = await replayPreviousSearch(reuseHistoryId, userId)
       if (replayed) {
         const message = buildReplayMessage(replayed)
         session.filters = {
@@ -375,15 +394,23 @@ assistantRouter.post('/message', async (req, res) => {
     return
   }
 
-  const { sessionId, answer, userId } = parsed.data
+  const { sessionId, answer } = parsed.data
   const session = getSession(sessionId)
   if (!session) {
     res.status(404).json({ error: 'Session not found' })
     return
   }
 
-  if (userId && !session.userId) {
-    session.userId = userId
+  const trusted = trustedUserIdFromBody({
+    userId: parsed.data.userId,
+    identity: parsed.data.identity,
+  })
+  if ('error' in trusted) {
+    res.status(401).json({ error: trusted.error })
+    return
+  }
+  if (trusted.userId && !session.userId) {
+    session.userId = trusted.userId
   }
 
   session.messages.push({ role: 'user', content: answer })
