@@ -1,5 +1,16 @@
-import { getContextPool, getDbPool } from '../context/db.js'
+import { getDbPool } from '../context/db.js'
 import { isDatabaseConfigured } from '../config/env.js'
+
+export const PRODUCT_EVENT_TYPES = [
+  'impression',
+  'click',
+  'cart',
+  'checkout',
+  'order',
+] as const
+
+export type ProductEventType = (typeof PRODUCT_EVENT_TYPES)[number]
+export const CONVERSION_EVENT_TYPES = ['cart', 'checkout', 'order'] as const
 
 export function isAnalyticsConfigured(): boolean {
   return isDatabaseConfigured()
@@ -64,7 +75,7 @@ export interface ProductEventInput {
   userId: string
   sessionId?: string
   searchId?: string
-  eventType: 'impression' | 'click'
+  eventType: ProductEventType
   sku: string
   productId?: string
   productName?: string
@@ -72,6 +83,12 @@ export interface ProductEventInput {
   listType?: 'primary' | 'alternative'
   source?: string
   position?: number
+  quoteId?: string
+  orderId?: string
+  qty?: number
+  revenue?: number
+  currency?: string
+  meta?: Record<string, unknown>
 }
 
 export async function insertProductEvents(
@@ -79,17 +96,20 @@ export async function insertProductEvents(
 ): Promise<number> {
   if (!isAnalyticsConfigured() || events.length === 0) return 0
 
-  const pool = getContextPool()
+  const pool = getDbPool()
   let inserted = 0
   for (const event of events) {
-    await pool.query(
+    const result = await pool.query(
       `INSERT INTO ai_product_events (
          user_id, session_id, search_id, event_type, sku, product_id,
-         product_name, product_url, list_type, source, position
+         product_name, product_url, list_type, source, position,
+         quote_id, order_id, qty, revenue, currency, meta
        ) VALUES (
          $1, $2::uuid, $3::uuid, $4, $5, $6,
-         $7, $8, $9, $10, $11
-       )`,
+         $7, $8, $9, $10, $11,
+         $12, $13, $14, $15, $16, $17::jsonb
+       )
+       ON CONFLICT DO NOTHING`,
       [
         event.userId,
         event.sessionId ?? null,
@@ -102,9 +122,15 @@ export async function insertProductEvents(
         event.listType ?? 'primary',
         event.source ?? null,
         event.position ?? null,
+        event.quoteId ?? null,
+        event.orderId ?? null,
+        event.qty ?? null,
+        event.revenue ?? null,
+        event.currency ?? null,
+        JSON.stringify(event.meta ?? {}),
       ],
     )
-    inserted += 1
+    inserted += result.rowCount ?? 0
   }
   return inserted
 }
@@ -121,6 +147,13 @@ export interface AnalyticsSummary {
   impressions: number
   clicks: number
   ctr: number
+  carts: number
+  checkouts: number
+  orders: number
+  cartRate: number
+  checkoutRate: number
+  conversionRate: number
+  revenue: number
   uniqueUsers: number
   topQueries: Array<{ query: string; count: number; zeroResults: number }>
   topClickedSkus: Array<{
@@ -128,6 +161,9 @@ export interface AnalyticsSummary {
     name: string | null
     impressions: number
     clicks: number
+    carts: number
+    checkouts: number
+    orders: number
     ctr: number
   }>
 }
@@ -172,10 +208,18 @@ export async function getAnalyticsSummary(
   const events = await pool.query<{
     impressions: string
     clicks: string
+    carts: string
+    checkouts: string
+    orders: string
+    revenue: string
   }>(
     `SELECT
        COUNT(*) FILTER (WHERE event_type = 'impression')::text AS impressions,
-       COUNT(*) FILTER (WHERE event_type = 'click')::text AS clicks
+       COUNT(*) FILTER (WHERE event_type = 'click')::text AS clicks,
+       COUNT(*) FILTER (WHERE event_type = 'cart')::text AS carts,
+       COUNT(*) FILTER (WHERE event_type = 'checkout')::text AS checkouts,
+       COUNT(*) FILTER (WHERE event_type = 'order')::text AS orders,
+       COALESCE(SUM(revenue) FILTER (WHERE event_type = 'order'), 0)::text AS revenue
      FROM ai_product_events
      WHERE ${since}`,
     params,
@@ -203,17 +247,26 @@ export async function getAnalyticsSummary(
     name: string | null
     impressions: string
     clicks: string
+    carts: string
+    checkouts: string
+    orders: string
   }>(
     `SELECT
        sku,
        MAX(product_name) FILTER (WHERE product_name IS NOT NULL AND product_name <> '') AS name,
        COUNT(*) FILTER (WHERE event_type = 'impression')::text AS impressions,
-       COUNT(*) FILTER (WHERE event_type = 'click')::text AS clicks
+       COUNT(*) FILTER (WHERE event_type = 'click')::text AS clicks,
+       COUNT(*) FILTER (WHERE event_type = 'cart')::text AS carts,
+       COUNT(*) FILTER (WHERE event_type = 'checkout')::text AS checkouts,
+       COUNT(*) FILTER (WHERE event_type = 'order')::text AS orders
      FROM ai_product_events
      WHERE ${since}
      GROUP BY sku
-     HAVING COUNT(*) FILTER (WHERE event_type = 'click') > 0
-     ORDER BY COUNT(*) FILTER (WHERE event_type = 'click') DESC,
+     HAVING COUNT(*) FILTER (WHERE event_type IN ('click', 'cart', 'checkout', 'order')) > 0
+     ORDER BY COUNT(*) FILTER (WHERE event_type = 'order') DESC,
+              COUNT(*) FILTER (WHERE event_type = 'checkout') DESC,
+              COUNT(*) FILTER (WHERE event_type = 'cart') DESC,
+              COUNT(*) FILTER (WHERE event_type = 'click') DESC,
               COUNT(*) FILTER (WHERE event_type = 'impression') DESC
      LIMIT 5`,
     params,
@@ -230,6 +283,10 @@ export async function getAnalyticsSummary(
   const magentoOnlyCount = sourceBreakdown.magento ?? 0
   const impressions = Number(events.rows[0]?.impressions ?? 0)
   const clicks = Number(events.rows[0]?.clicks ?? 0)
+  const carts = Number(events.rows[0]?.carts ?? 0)
+  const checkouts = Number(events.rows[0]?.checkouts ?? 0)
+  const orders = Number(events.rows[0]?.orders ?? 0)
+  const revenue = Number(events.rows[0]?.revenue ?? 0)
 
   return {
     windowDays,
@@ -244,6 +301,13 @@ export async function getAnalyticsSummary(
     impressions,
     clicks,
     ctr: impressions > 0 ? clicks / impressions : 0,
+    carts,
+    checkouts,
+    orders,
+    cartRate: clicks > 0 ? carts / clicks : 0,
+    checkoutRate: clicks > 0 ? checkouts / clicks : 0,
+    conversionRate: clicks > 0 ? orders / clicks : 0,
+    revenue,
     uniqueUsers: Number(searchStats.rows[0]?.unique_users ?? 0),
     topQueries: topQueries.rows.map((r) => ({
       query: r.query,
@@ -258,6 +322,9 @@ export async function getAnalyticsSummary(
         name: r.name,
         impressions,
         clicks,
+        carts: Number(r.carts),
+        checkouts: Number(r.checkouts),
+        orders: Number(r.orders),
         ctr: impressions > 0 ? clicks / impressions : clicks > 0 ? 1 : 0,
       }
     }),

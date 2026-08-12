@@ -6,6 +6,11 @@ import {
   listRecentSearches,
   trackProductEvents,
 } from '../analytics/index.js'
+import { CONVERSION_EVENT_TYPES } from '../analytics/repository.js'
+import {
+  isAnalyticsIngestConfigured,
+  verifyAnalyticsIngestToken,
+} from '../auth/analyticsIngest.js'
 import { identityProofSchema, trustedUserIdFromBody } from '../auth/resolveRequestUser.js'
 import { isCustomerIdentityConfigured } from '../auth/customerIdentity.js'
 
@@ -16,6 +21,7 @@ analyticsRouter.get('/status', (_req, res) => {
     ok: true,
     enabled: isAnalyticsConfigured(),
     customerIdentityHmac: isCustomerIdentityConfigured(),
+    conversionIngest: isAnalyticsIngestConfigured(),
     message: isAnalyticsConfigured()
       ? 'Analytics uses DATABASE_URL (Postgres). Run: npm run db:migrate:analytics'
       : 'Set DATABASE_URL in server/.env to enable analytics',
@@ -82,13 +88,22 @@ const trackSchema = z.object({
   events: z
     .array(
       z.object({
-        eventType: z.enum(['impression', 'click']),
+        eventType: z.enum(['impression', 'click', 'cart', 'checkout', 'order']),
         sku: z.string().trim().min(1),
         productId: z.string().optional(),
         productName: z.string().optional(),
         productUrl: z.string().optional(),
         listType: z.enum(['primary', 'alternative']).optional(),
         position: z.number().int().min(0).optional(),
+        searchId: z.string().uuid().optional(),
+        sessionId: z.string().uuid().optional(),
+        source: z.string().optional(),
+        quoteId: z.string().trim().min(1).max(64).optional(),
+        orderId: z.string().trim().min(1).max(64).optional(),
+        qty: z.number().finite().nonnegative().optional(),
+        revenue: z.number().finite().nonnegative().optional(),
+        currency: z.string().trim().min(1).max(8).optional(),
+        meta: z.record(z.string(), z.unknown()).optional(),
       }),
     )
     .min(1)
@@ -105,22 +120,40 @@ analyticsRouter.post('/track', async (req, res) => {
     res.status(400).json({ ok: false, error: 'invalid_payload' })
     return
   }
-  const trusted = trustedUserIdFromBody({
-    userId: parsed.data.userId,
-    identity: parsed.data.identity,
-  })
-  if ('error' in trusted) {
-    res.status(401).json({ ok: false, error: trusted.error })
-    return
+  const hasConversion = parsed.data.events.some((e) =>
+    (CONVERSION_EVENT_TYPES as readonly string[]).includes(e.eventType),
+  )
+  let userId: string
+  if (hasConversion) {
+    if (!verifyAnalyticsIngestToken(req)) {
+      res.status(401).json({
+        ok: false,
+        error: isAnalyticsIngestConfigured()
+          ? 'ingest_token_invalid'
+          : 'ingest_token_not_configured',
+      })
+      return
+    }
+    userId = parsed.data.userId
+  } else {
+    const trusted = trustedUserIdFromBody({
+      userId: parsed.data.userId,
+      identity: parsed.data.identity,
+    })
+    if ('error' in trusted) {
+      res.status(401).json({ ok: false, error: trusted.error })
+      return
+    }
+    userId = trusted.userId
   }
   const { sessionId, searchId, source, events } = parsed.data
   try {
     const inserted = await trackProductEvents(
       events.map((e) => ({
-        userId: trusted.userId,
-        sessionId,
-        searchId,
-        source,
+        userId,
+        sessionId: e.sessionId ?? sessionId,
+        searchId: e.searchId ?? searchId,
+        source: e.source ?? source,
         eventType: e.eventType,
         sku: e.sku,
         productId: e.productId,
@@ -128,6 +161,12 @@ analyticsRouter.post('/track', async (req, res) => {
         productUrl: e.productUrl,
         listType: e.listType,
         position: e.position,
+        quoteId: e.quoteId,
+        orderId: e.orderId,
+        qty: e.qty,
+        revenue: e.revenue,
+        currency: e.currency,
+        meta: e.meta,
       })),
     )
     res.json({ ok: true, inserted })

@@ -33,13 +33,16 @@ function MetricCard({
   )
 }
 
-/** One product: “shown → opened” in plain language. */
+/** One product: shown → opened → cart → checkout → ordered. */
 function ProductFunnelCard({
   rank,
   name,
   sku,
   impressions,
   clicks,
+  carts,
+  checkouts,
+  orders,
   ctr,
 }: {
   rank: number
@@ -47,6 +50,9 @@ function ProductFunnelCard({
   sku: string
   impressions: number
   clicks: number
+  carts: number
+  checkouts: number
+  orders: number
   ctr: number
 }) {
   const shown = Math.max(impressions, clicks)
@@ -64,9 +70,15 @@ function ProductFunnelCard({
             <p className="truncate font-mono text-[11px] text-ink-faint">{sku}</p>
           ) : null}
           <p className="mt-2 text-sm text-ink-muted">
-            Shown <strong className="text-ink">{impressions}</strong> times
+            Shown <strong className="text-ink">{impressions}</strong>
             <span className="mx-1.5 text-ink-faint">→</span>
-            Opened <strong className="text-ink">{clicks}</strong> times
+            Opened <strong className="text-ink">{clicks}</strong>
+            <span className="mx-1.5 text-ink-faint">→</span>
+            Cart <strong className="text-ink">{carts}</strong>
+            <span className="mx-1.5 text-ink-faint">→</span>
+            Checkout <strong className="text-ink">{checkouts}</strong>
+            <span className="mx-1.5 text-ink-faint">→</span>
+            Ordered <strong className="text-ink">{orders}</strong>
             <span className="ml-2 rounded-md bg-accent-soft px-1.5 py-0.5 text-xs font-medium text-accent">
               {pct(ctr)} opened
             </span>
@@ -201,7 +213,7 @@ export function AnalyticsPage() {
               </h1>
               <p className="mt-1 max-w-2xl text-sm text-ink-muted">
                 What shoppers searched, Magento vs hybrid lift, zero-result rate,
-                and product CTR — data marketing needs for ROI.
+                product CTR, cart, checkout, and placed orders.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -253,6 +265,60 @@ export function AnalyticsPage() {
                   value={pct(summary.ctr)}
                   hint={`${summary.clicks} clicks / ${summary.impressions} impressions`}
                 />
+                <MetricCard
+                  label="Reached cart"
+                  value={String(summary.carts)}
+                  hint={`${pct(summary.cartRate)} of clicks`}
+                />
+                <MetricCard
+                  label="Reached checkout"
+                  value={String(summary.checkouts)}
+                  hint={`${pct(summary.checkoutRate)} of clicks`}
+                />
+                <MetricCard
+                  label="Placed orders"
+                  value={String(summary.orders)}
+                  hint={`${pct(summary.conversionRate)} of clicks`}
+                />
+                <MetricCard
+                  label="Cart → checkout"
+                  value={
+                    summary.carts > 0
+                      ? pct(summary.checkouts / summary.carts)
+                      : '0%'
+                  }
+                  hint={
+                    summary.carts > 0
+                      ? `${Math.max(0, summary.carts - summary.checkouts)} left at cart`
+                      : 'No cart events yet'
+                  }
+                />
+                <MetricCard
+                  label="Checkout → order"
+                  value={
+                    summary.checkouts > 0
+                      ? pct(summary.orders / summary.checkouts)
+                      : '0%'
+                  }
+                  hint={
+                    summary.checkouts > 0
+                      ? `${Math.max(0, summary.checkouts - summary.orders)} abandoned checkout`
+                      : 'No checkout events yet'
+                  }
+                />
+                <MetricCard
+                  label="Order revenue"
+                  value={
+                    summary.revenue > 0
+                      ? new Intl.NumberFormat('en-US', {
+                          style: 'currency',
+                          currency: 'USD',
+                          maximumFractionDigits: 0,
+                        }).format(summary.revenue)
+                      : '—'
+                  }
+                  hint="Sum of attributed order line totals"
+                />
               </div>
 
               <div className="grid gap-6 lg:grid-cols-2">
@@ -298,7 +364,7 @@ export function AnalyticsPage() {
                     Products people opened
                   </h2>
                   <p className="mt-1 text-sm text-ink-muted">
-                    Top 5 — how often a card was shown vs opened (View Product)
+                    Top 5 — shown → View Product → cart → checkout → order
                   </p>
                   <div className="mt-4 space-y-3">
                     {summary.topClickedSkus.map((row, i) => (
@@ -309,6 +375,9 @@ export function AnalyticsPage() {
                         sku={row.sku}
                         impressions={row.impressions}
                         clicks={row.clicks}
+                        carts={row.carts}
+                        checkouts={row.checkouts}
+                        orders={row.orders}
                         ctr={row.ctr}
                       />
                     ))}

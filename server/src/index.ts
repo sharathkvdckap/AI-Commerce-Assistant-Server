@@ -6,6 +6,7 @@ import { getModelInfo } from './ai/engine.js'
 import {
   config,
   getMagentoGraphqlUrl,
+  isAnalyticsIngestConfigured,
   isContextMemoryConfigured,
   isMagentoConfigured,
   isSemanticConfigured,
@@ -96,7 +97,8 @@ app.get('/api/health', async (_req, res) => {
     },
     analytics: {
       enabled: isAnalyticsConfigured(),
-      note: 'Zero-result, hybrid lift, CTR — requires DATABASE_URL + db:migrate:analytics',
+      conversionIngest: isAnalyticsIngestConfigured(),
+      note: 'Zero-result, hybrid lift, CTR, checkout, orders — requires DATABASE_URL + db:migrate:analytics',
     },
     customerIdentity: {
       hmacRequired: isCustomerIdentityConfigured(),
@@ -154,6 +156,9 @@ app.listen(config.port, () => {
   )
   console.log(
     `Analytics: ${isAnalyticsConfigured() ? 'enabled' : 'disabled'}`,
+  )
+  console.log(
+    `Conversion ingest: ${isAnalyticsIngestConfigured() ? 'enabled' : 'off (set ANALYTICS_INGEST_SECRET)'}`,
   )
   console.log(
     `Customer identity HMAC: ${isCustomerIdentityConfigured() ? 'enabled' : 'off (dev unsigned OK)'}`,

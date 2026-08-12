@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Config:etc/system_file.xsd">
+    <system>
+        <tab id="klizer" translate="label" sortOrder="400">
+            <label>Klizer</label>
+        </tab>
+        <section id="klizer_aiconversion" translate="label" sortOrder="120"
+                 showInDefault="1" showInWebsite="1" showInStore="1">
+            <class>separator-top</class>
+            <label>AI Commerce Conversion</label>
+            <tab>klizer</tab>
+            <resource>Klizer_AiCommerceConversion::config</resource>
+            <group id="general" translate="label" sortOrder="10"
+                   showInDefault="1" showInWebsite="1" showInStore="1">
+                <label>Checkout &amp; order tracking</label>
+                <field id="enabled" translate="label" type="select" sortOrder="10"
+                       showInDefault="1" showInWebsite="1" showInStore="1">
+                    <label>Enable</label>
+                    <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
+                </field>
+                <field id="api_base_url" translate="label comment" type="text" sortOrder="20"
+                       showInDefault="1" showInWebsite="1" showInStore="1">
+                    <label>Assistant API base URL</label>
+                    <comment>Example: http://127.0.0.1:3001 (no trailing slash)</comment>
+                </field>
+                <field id="ingest_token" translate="label comment" type="obscure" sortOrder="30"
+                       showInDefault="1" showInWebsite="1" showInStore="0">
+                    <label>Ingest token</label>
+                    <backend_model>Magento\Config\Model\Config\Backend\Encrypted</backend_model>
+                    <comment>Same value as ANALYTICS_INGEST_SECRET (or CUSTOMER_ID_HMAC_SECRET) on Node. Sent as X-Analytics-Ingest-Token.</comment>
+                </field>
+            </group>
+        </section>
+    </system>
+</config>

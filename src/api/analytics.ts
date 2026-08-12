@@ -12,6 +12,13 @@ export interface AnalyticsSummary {
   impressions: number
   clicks: number
   ctr: number
+  carts: number
+  checkouts: number
+  orders: number
+  cartRate: number
+  checkoutRate: number
+  conversionRate: number
+  revenue: number
   uniqueUsers: number
   topQueries: Array<{ query: string; count: number; zeroResults: number }>
   topClickedSkus: Array<{
@@ -19,6 +26,9 @@ export interface AnalyticsSummary {
     name: string | null
     impressions: number
     clicks: number
+    carts: number
+    checkouts: number
+    orders: number
     ctr: number
   }>
 }
@@ -59,7 +69,7 @@ export async function trackProductEvents(input: {
   searchId?: string | null
   source?: string | null
   events: Array<{
-    eventType: 'impression' | 'click'
+    eventType: 'impression' | 'click' | 'cart' | 'checkout' | 'order'
     sku: string
     productId?: string
     productName?: string
@@ -114,6 +124,29 @@ export function trackImpressions(input: {
   })
 }
 
+export function withAssistantAttribution(
+  productUrl: string,
+  attrs: {
+    sku: string
+    searchId?: string | null
+    sessionId?: string | null
+    source?: string | null
+  },
+): string {
+  if (!productUrl || productUrl === '#') return productUrl
+  try {
+    const url = new URL(productUrl, window.location.origin)
+    if (attrs.searchId) url.searchParams.set('ai_search_id', attrs.searchId)
+    if (attrs.sessionId) url.searchParams.set('ai_session_id', attrs.sessionId)
+    url.searchParams.set('ai_sku', attrs.sku)
+    url.searchParams.set('ai_uid', getOrCreateUserId())
+    if (attrs.source) url.searchParams.set('ai_source', attrs.source)
+    return url.toString()
+  } catch {
+    return productUrl
+  }
+}
+
 export function trackProductClick(input: {
   sessionId?: string | null
   searchId?: string | null
@@ -149,7 +182,36 @@ export async function fetchAnalyticsSummary(
     ok?: boolean
     summary?: AnalyticsSummary
   }
-  return data.summary ?? null
+  if (!data.summary) return null
+  const summary = data.summary
+  return {
+    windowDays: summary.windowDays,
+    totalSearches: summary.totalSearches,
+    zeroResultCount: summary.zeroResultCount,
+    zeroResultRate: summary.zeroResultRate,
+    sourceBreakdown: summary.sourceBreakdown,
+    hybridOrSemanticCount: summary.hybridOrSemanticCount,
+    hybridLiftShare: summary.hybridLiftShare,
+    magentoOnlyCount: summary.magentoOnlyCount,
+    impressions: summary.impressions,
+    clicks: summary.clicks,
+    ctr: summary.ctr,
+    carts: summary.carts ?? 0,
+    checkouts: summary.checkouts ?? 0,
+    orders: summary.orders ?? 0,
+    cartRate: summary.cartRate ?? 0,
+    checkoutRate: summary.checkoutRate ?? 0,
+    conversionRate: summary.conversionRate ?? 0,
+    revenue: summary.revenue ?? 0,
+    uniqueUsers: summary.uniqueUsers,
+    topQueries: summary.topQueries,
+    topClickedSkus: (summary.topClickedSkus ?? []).map((row) => ({
+      ...row,
+      carts: row.carts ?? 0,
+      checkouts: row.checkouts ?? 0,
+      orders: row.orders ?? 0,
+    })),
+  }
 }
 
 export async function fetchAnalyticsSearches(

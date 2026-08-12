@@ -74,6 +74,15 @@ export const config = {
     /** Reject exp more than this many seconds in the future. */
     maxFutureSkewSec: envInt(process.env.CUSTOMER_ID_MAX_FUTURE_SKEW_SEC, 7200),
   },
+  /**
+   * Shared secret Magento sends as X-Analytics-Ingest-Token for checkout/order.
+   * Falls back to CUSTOMER_ID_HMAC_SECRET when unset.
+   */
+  analyticsIngestSecret: (
+    process.env.ANALYTICS_INGEST_SECRET ??
+    process.env.CUSTOMER_ID_HMAC_SECRET ??
+    ''
+  ).trim(),
 }
 
 export function isMagentoConfigured(): boolean {
@@ -96,4 +105,8 @@ export function isContextMemoryConfigured(): boolean {
 
 export function isSemanticConfigured(): boolean {
   return config.semantic.enabled && isDatabaseConfigured()
+}
+
+export function isAnalyticsIngestConfigured(): boolean {
+  return Boolean(config.analyticsIngestSecret)
 }

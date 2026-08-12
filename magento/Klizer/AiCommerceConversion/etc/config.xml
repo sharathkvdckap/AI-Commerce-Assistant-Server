@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Store:etc/config.xsd">
+    <default>
+        <klizer_aiconversion>
+            <general>
+                <enabled>1</enabled>
+                <api_base_url>http://127.0.0.1:3001</api_base_url>
+                <ingest_token></ingest_token>
+            </general>
+        </klizer_aiconversion>
+    </default>
+</config>

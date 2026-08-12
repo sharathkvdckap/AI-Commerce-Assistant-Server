@@ -1,0 +1,16 @@
+<?php
+/** @var \Magento\Framework\View\Element\Template $block */
+$captureUrl = $block->getUrl('aiconversion/attribution/capture');
+?>
+<script>
+(function () {
+  try {
+    var params = new URLSearchParams(window.location.search);
+    if (!params.get('ai_search_id') || !params.get('ai_sku')) return;
+    fetch(<?= json_encode($captureUrl) ?> + (<?= json_encode($captureUrl) ?>.indexOf('?') >= 0 ? '&' : '?') + params.toString(), {
+      credentials: 'same-origin',
+      keepalive: true
+    }).catch(function () {});
+  } catch (e) {}
+})();
+</script>

@@ -2,7 +2,7 @@ import { ExternalLink } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { trackProductClick } from '@/api/analytics'
+import { trackProductClick, withAssistantAttribution } from '@/api/analytics'
 import type { ProductRecommendation } from '@/types/assistant'
 
 interface ProductCardProps {
@@ -42,7 +42,16 @@ export function ProductCard({
       position,
     })
     if (product.productUrl !== '#') {
-      window.open(product.productUrl, '_blank', 'noopener,noreferrer')
+      window.open(
+        withAssistantAttribution(product.productUrl, {
+          sku: product.sku,
+          searchId,
+          sessionId,
+          source,
+        }),
+        '_blank',
+        'noopener,noreferrer',
+      )
     }
   }
 
