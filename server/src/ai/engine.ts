@@ -1,5 +1,10 @@
 import { ChatOllama } from '@langchain/ollama'
-import { HumanMessage, SystemMessage } from '@langchain/core/messages'
+import { ChatGroq } from '@langchain/groq'
+import {
+  HumanMessage,
+  SystemMessage,
+  type BaseMessage,
+} from '@langchain/core/messages'
 import { z } from 'zod'
 import {
   getApparelCategoryOptions,
@@ -17,10 +22,36 @@ import {
   getDomainConfig,
   isClarifyStepNeeded,
 } from '../config/domainConfig.js'
+import { config } from '../config/env.js'
 import { buildSystemPrompt } from './prompt.js'
 
-const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434'
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:3b'
+async function invokeChatLlm(messages: BaseMessage[]) {
+  const { provider, ollama, groq } = config.llm
+
+  if (provider === 'groq') {
+    if (!groq.apiKey) {
+      throw new Error(
+        'LLM_PROVIDER=groq requires GROQ_API_KEY (get one at https://console.groq.com/keys)',
+      )
+    }
+    const llm = new ChatGroq({
+      apiKey: groq.apiKey,
+      model: groq.model,
+      temperature: 0.2,
+    })
+    return llm.invoke(messages, {
+      response_format: { type: 'json_object' },
+    })
+  }
+
+  const llm = new ChatOllama({
+    baseUrl: ollama.baseUrl,
+    model: ollama.model,
+    temperature: 0.2,
+    format: 'json',
+  })
+  return llm.invoke(messages)
+}
 
 /** Clarifying questions after the initial query (total user turns - 1). */
 const MAX_CLARIFYING_QUESTIONS = 3
@@ -972,15 +1003,8 @@ export async function runAssistantTurn(input: {
     return forceSearch(seededFilters)
   }
 
-  const llm = new ChatOllama({
-    baseUrl: OLLAMA_BASE_URL,
-    model: OLLAMA_MODEL,
-    temperature: 0.2,
-    format: 'json',
-  })
-
   try {
-    const result = await llm.invoke([
+    const result = await invokeChatLlm([
       new SystemMessage(
         buildSystemPrompt(buildMerchantSystemAppendix(getDomainConfig())),
       ),
@@ -1100,5 +1124,17 @@ export async function runAssistantTurn(input: {
 }
 
 export function getModelInfo() {
-  return { model: OLLAMA_MODEL, baseUrl: OLLAMA_BASE_URL }
+  const { provider, ollama, groq } = config.llm
+  if (provider === 'groq') {
+    return {
+      provider: 'groq' as const,
+      model: groq.model,
+      baseUrl: 'https://api.groq.com',
+    }
+  }
+  return {
+    provider: 'ollama' as const,
+    model: ollama.model,
+    baseUrl: ollama.baseUrl,
+  }
 }

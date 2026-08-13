@@ -139,7 +139,7 @@ app.listen(config.port, () => {
   const info = getModelInfo()
   const domain = getDomainConfig()
   console.log(`AI Commerce Assistant API on http://localhost:${config.port}`)
-  console.log(`Ollama model: ${info.model} @ ${info.baseUrl}`)
+  console.log(`Chat LLM (${info.provider}): ${info.model} @ ${info.baseUrl}`)
   console.log(
     `Magento GraphQL: ${getMagentoGraphqlUrl() || '(not configured)'}`,
   )

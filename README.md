@@ -149,9 +149,12 @@ Copy from `server/.env.example`. Important keys:
 | `MAGENTO_GRAPHQL_USE_AUTH` | `false` | Send Bearer token |
 | `MAGENTO_PAGE_SIZE` | `0` | Page size (0 = server default) |
 | `MAGENTO_TIMEOUT_MS` | `20000` | GraphQL timeout |
-| `OLLAMA_MODEL` | `qwen2.5:3b` | Chat model |
-| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Ollama host |
-| `OLLAMA_TIMEOUT_MS` | `120000` | LLM call timeout |
+| `LLM_PROVIDER` | `ollama` | Chat backend: `ollama` or `groq` |
+| `OLLAMA_MODEL` | `qwen2.5:3b` | Ollama chat model (when `LLM_PROVIDER=ollama`) |
+| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Ollama host (chat + embeddings) |
+| `OLLAMA_TIMEOUT_MS` | `120000` | Ollama LLM call timeout |
+| `GROQ_API_KEY` | *(empty)* | Required when `LLM_PROVIDER=groq` |
+| `GROQ_MODEL` | `llama-3.1-8b-instant` | Groq free-tier chat model |
 | `PORT` | `3001` | API port |
 | `SEMANTIC_ENABLED` | `true` | Hybrid Magento + pgvector |
 | `DATABASE_URL` | `postgresql://…/ai_commerce_assistant` | Postgres (+ pgvector) |

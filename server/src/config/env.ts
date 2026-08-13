@@ -24,8 +24,26 @@ const databaseUrl =
   process.env.DATABASE_URL ??
   'postgresql://postgres:postgres@127.0.0.1:5432/ai_commerce_assistant'
 
+const llmProviderRaw = (process.env.LLM_PROVIDER ?? 'ollama').toLowerCase()
+const llmProvider =
+  llmProviderRaw === 'groq' ? ('groq' as const) : ('ollama' as const)
+
 export const config = {
   port: envInt(process.env.PORT, 3001),
+  /** Chat LLM: `ollama` (local) or `groq` (cloud free-tier). Embeddings still use Ollama. */
+  llm: {
+    provider: llmProvider,
+    ollama: {
+      model: process.env.OLLAMA_MODEL ?? 'qwen2.5:3b',
+      baseUrl: process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434',
+    },
+    groq: {
+      apiKey: (process.env.GROQ_API_KEY ?? '').trim(),
+      /** Free-tier default: fast Llama 3.1 8B Instant */
+      model: process.env.GROQ_MODEL ?? 'llama-3.1-8b-instant',
+    },
+  },
+  /** @deprecated Prefer config.llm.ollama — kept for embedding callers. */
   ollama: {
     model: process.env.OLLAMA_MODEL ?? 'qwen2.5:3b',
     baseUrl: process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434',
